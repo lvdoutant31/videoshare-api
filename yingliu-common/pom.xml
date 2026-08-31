@@ -1,0 +1,12 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+    <modelVersion>4.0.0</modelVersion>
+    <parent><groupId>com.yingliu</groupId><artifactId>yingliu-parent</artifactId><version>0.1.0-SNAPSHOT</version></parent>
+    <artifactId>yingliu-common</artifactId>
+    <dependencies>
+        <!-- Current trace filter is Servlet-based; move it to a future common-web module before removing this starter. -->
+        <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-web</artifactId></dependency>
+        <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-validation</artifactId></dependency>
+        <dependency><groupId>org.springframework</groupId><artifactId>spring-tx</artifactId></dependency>
+        <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-test</artifactId><scope>test</scope></dependency>
+    </dependencies>
+</project>

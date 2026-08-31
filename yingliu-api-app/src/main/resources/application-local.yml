@@ -1,0 +1,33 @@
+spring:
+  config:
+    activate:
+      on-profile: local
+    import: optional:file:.env[.properties]
+  datasource:
+    url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:yingliu-db}?useUnicode=true&characterEncoding=utf8&connectionTimeZone=UTC
+    username: ${MYSQL_USER:root}
+    password: ${MYSQL_PASSWORD}
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+  flyway:
+    enabled: ${FLYWAY_ENABLED:true}
+    baseline-on-migrate: true
+    baseline-version: 202608271200
+yingliu:
+  admin:
+    cors:
+      allowed-origin: ${YINGLIU_ADMIN_CORS_ALLOWED_ORIGIN:}
+  local:
+    seed:
+      enabled: ${YINGLIU_LOCAL_SEED_ENABLED:false}
+mybatis-plus:
+  configuration:
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
+logging:
+  level:
+    com.yingliu.domain: DEBUG
+server:
+  port: ${APP_PORT:8080}

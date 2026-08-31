@@ -1,0 +1,16 @@
+{
+  "name": "yingliu-workspace",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@9.15.4",
+  "engines": { "node": ">=20 <21", "pnpm": "9.15.4" },
+  "scripts": {
+    "dev:b": "pnpm --filter yingliu-b dev",
+    "dev:c": "pnpm --filter yingliu-c dev",
+    "dev:h5": "pnpm --filter yingliu-c dev",
+    "dev:admin": "pnpm --filter yingliu-b dev",
+    "build": "pnpm -r --if-present build",
+    "test": "pnpm -r --if-present test",
+    "typecheck": "pnpm -r --if-present typecheck"
+  }
+}

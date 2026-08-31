@@ -1,0 +1,1 @@
+:root { font-family: Arial, sans-serif; color: #f6f8fb; background: #0b0d12; } body { margin: 0; } .screen { min-height: 100vh; display: grid; place-content: center; gap: 12px; padding: 24px; text-align: center; } button { padding: 10px 16px; border: 0; border-radius: 4px; background: #20d9d2; color: #0b0d12; }

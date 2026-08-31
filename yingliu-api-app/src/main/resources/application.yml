@@ -1,0 +1,43 @@
+spring:
+  application:
+    name: yingliu-api
+  profiles:
+    default: local
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
+  jackson:
+    time-zone: UTC
+  jpa:
+    hibernate:
+      ddl-auto: none
+  flyway:
+    enabled: ${FLYWAY_ENABLED:false}
+sa-token:
+  token-name: yingliu-admin-session
+  is-read-cookie: true
+  cookie:
+    path: /
+    http-only: true
+    same-site: Lax
+    secure: ${YINGLIU_ADMIN_COOKIE_SECURE:false}
+yingliu:
+  worker:
+    scheduled-publish:
+      enabled: false
+      fixed-delay: 5000
+      batch-size: 50
+      processing-timeout: 5m
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+server:
+  shutdown: graceful
+logging:
+  pattern:
+    console: "%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %-5level [%X{traceId:-}] %logger{36} - %msg%n"

@@ -1,0 +1,28 @@
+:root {
+  --yl-canvas: #f6f8fb;
+  --yl-surface: #ffffff;
+  --yl-surface-subtle: #fafbfc;
+  --yl-text: #1f2937;
+  --yl-text-secondary: #566176;
+  --yl-text-muted: #8a94a6;
+  --yl-border: #e3e7ee;
+  --yl-indigo: #5b6cff;
+  --yl-teal: #20d9d2;
+  --yl-coral: #ff5a62;
+  --yl-sidebar-width: 224px;
+  --yl-sidebar-collapsed: 72px;
+  --yl-topbar-height: 56px;
+  --yl-font-ui: Inter, "Noto Sans SC", "Microsoft YaHei", "PingFang SC", sans-serif;
+  color: var(--yl-text);
+  background: var(--yl-canvas);
+  font-family: var(--yl-font-ui);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* { box-sizing: border-box; }
+html, body, #app { min-height: 100%; }
+body { margin: 0; min-width: 1180px; background: var(--yl-canvas); }
+button, input, select, textarea { font-family: var(--yl-font-ui); }
+button { -webkit-tap-highlight-color: transparent; }
+::selection { color: #fff; background: var(--yl-indigo); }
