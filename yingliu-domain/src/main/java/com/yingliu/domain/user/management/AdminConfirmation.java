@@ -8,6 +8,7 @@ import com.baomidou.mybatisplus.annotation.TableName;
 
 import java.time.LocalDateTime;
 
+/** 高影响管理操作的确认凭据记录，保存令牌摘要、操作目标及消费时间。 */
 @TableName("sys_admin_confirmation")
 public class AdminConfirmation {
     @TableId(type = IdType.ASSIGN_ID)

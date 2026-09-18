@@ -10,10 +10,11 @@ import org.apache.ibatis.annotations.Update;
 
 @Mapper
 public interface VideoMapper extends BaseMapper<Video> {
-    @Update("UPDATE video SET title = #{title}, description = #{description}, visibility = #{visibility}, current_version = current_version + 1, updated_by = #{actorAdminId}, updated_at = NOW(3) WHERE id = #{videoId} AND deleted = 0 AND current_version = #{currentVersion} AND publish_status <> 'DELETED'")
+    @Update("UPDATE video SET title = #{title}, description = #{description}, visibility = #{visibility}, original_media_id = #{originalMediaId}, current_version = current_version + 1, updated_by = #{actorAdminId}, updated_at = NOW(3) WHERE id = #{videoId} AND deleted = 0 AND current_version = #{currentVersion} AND publish_status <> 'DELETED'")
     int updateMetadata(@Param("videoId") long videoId, @Param("actorAdminId") long actorAdminId,
                        @Param("currentVersion") int currentVersion, @Param("title") String title,
-                       @Param("description") String description, @Param("visibility") String visibility);
+                       @Param("description") String description, @Param("visibility") String visibility,
+                       @Param("originalMediaId") long originalMediaId);
 
     @Update("UPDATE video SET audit_status = 'CLAIMED', updated_by = #{actorAdminId}, updated_at = NOW(3) WHERE id = #{videoId} AND deleted = 0 AND audit_status = 'PENDING_REVIEW' AND current_version = #{currentVersion}")
     int claimReview(@Param("videoId") long videoId, @Param("actorAdminId") long actorAdminId, @Param("currentVersion") int currentVersion);
@@ -21,7 +22,7 @@ public interface VideoMapper extends BaseMapper<Video> {
     @Update("UPDATE video SET audit_status = 'REVISION_REQUIRED', updated_by = #{actorAdminId}, updated_at = NOW(3) WHERE id = #{videoId} AND deleted = 0 AND audit_status IN ('PENDING_REVIEW','CLAIMED') AND current_version = #{currentVersion}")
     int requestRevision(@Param("videoId") long videoId, @Param("actorAdminId") long actorAdminId, @Param("currentVersion") int currentVersion);
     @Update("UPDATE video SET audit_status = 'PENDING_REVIEW', updated_by = #{actorAdminId}, updated_at = NOW(3) "
-            + "WHERE id = #{videoId} AND deleted = 0 AND audit_status = 'DRAFT' AND publish_status = 'UNPUBLISHED'")
+            + "WHERE id = #{videoId} AND deleted = 0 AND audit_status IN ('DRAFT','REJECTED','REVISION_REQUIRED') AND publish_status = 'UNPUBLISHED'")
     int submitForReview(@Param("videoId") long videoId, @Param("actorAdminId") long actorAdminId);
 
     @Update("UPDATE video SET audit_status = 'APPROVED', updated_by = #{actorAdminId}, updated_at = NOW(3) "
@@ -86,12 +87,33 @@ public interface VideoMapper extends BaseMapper<Video> {
     java.util.List<Video> selectPublicFeed(@Param("publishedAt") java.time.LocalDateTime publishedAt,
                                            @Param("videoId") Long videoId, @Param("limit") int limit);
 
+    @Select("<script>SELECT v.* FROM video v JOIN user_follow f ON f.followee_id = v.author_id "
+            + "WHERE f.follower_id = #{viewerId} AND v.deleted = 0 AND v.audit_status = 'APPROVED' "
+            + "AND v.publish_status = 'PUBLISHED' AND v.visibility = 'PUBLIC' AND v.published_at IS NOT NULL "
+            + "AND v.off_shelf_at IS NULL AND EXISTS (SELECT 1 FROM sys_user u WHERE u.id = v.author_id "
+            + "AND u.status = 'NORMAL' AND u.deleted = 0) AND EXISTS (SELECT 1 FROM media_resource m "
+            + "WHERE m.id = v.original_media_id AND m.resource_type = 'VIDEO_ORIGINAL' AND m.storage_state = 'READY') "
+            + "<if test='publishedAt != null'>AND (v.published_at &lt; #{publishedAt} OR (v.published_at = #{publishedAt} "
+            + "AND v.id &lt; #{videoId})) </if>ORDER BY v.published_at DESC, v.id DESC LIMIT #{limit}</script>")
+    java.util.List<Video> selectFollowingFeed(@Param("viewerId") long viewerId,
+                                              @Param("publishedAt") java.time.LocalDateTime publishedAt,
+                                              @Param("videoId") Long videoId, @Param("limit") int limit);
+
     @Select("SELECT v.* FROM video v WHERE v.id = #{videoId} AND v.deleted = 0 AND v.audit_status = 'APPROVED' "
             + "AND v.publish_status = 'PUBLISHED' AND v.visibility = 'PUBLIC' AND v.published_at IS NOT NULL "
             + "AND v.off_shelf_at IS NULL AND EXISTS (SELECT 1 FROM sys_user u WHERE u.id = v.author_id "
             + "AND u.status = 'NORMAL' AND u.deleted = 0) AND EXISTS (SELECT 1 FROM media_resource m "
             + "WHERE m.id = v.original_media_id AND m.resource_type = 'VIDEO_ORIGINAL' AND m.storage_state = 'READY')")
     Video selectPublicById(@Param("videoId") long videoId);
+
+    /** 作者公开视频 ID（游标按 id 倒序；作者主页网格） */
+    @Select("<script>SELECT v.id FROM video v WHERE v.author_id = #{authorId} AND v.deleted = 0 "
+            + "AND v.audit_status = 'APPROVED' AND v.publish_status = 'PUBLISHED' AND v.visibility = 'PUBLIC' "
+            + "AND v.published_at IS NOT NULL AND v.off_shelf_at IS NULL "
+            + "<if test='cursorId != null'>AND v.id &lt; #{cursorId} </if>"
+            + "ORDER BY v.id DESC LIMIT #{limit}</script>")
+    java.util.List<Long> selectPublicIdsByAuthor(@Param("authorId") long authorId,
+                                                 @Param("cursorId") Long cursorId, @Param("limit") int limit);
 
     @Select("<script>SELECT * FROM video WHERE deleted = 0 AND audit_status = 'PENDING_REVIEW' "
             + "<if test='keyword != null and keyword != \"\"'>AND title LIKE CONCAT('%', #{keyword}, '%') </if>"

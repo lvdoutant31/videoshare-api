@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 
+/** 标签维护用例，统一标签查询及维护规则。 */
 @Service
 @Profile("!test")
 public class ContentTagService {
@@ -26,6 +27,12 @@ public class ContentTagService {
                 .orderByDesc(ContentTag::getHeatScore)
                 .orderByDesc(ContentTag::getId));
         return new ServicePage<>(result.getRecords(), result.getTotal());
+    }
+
+    /** List soft-deleted tags (trash / recycle bin). */
+    public ServicePage<ContentTag> listDeleted(long page, long pageSize, String keyword) {
+        long offset = (page - 1) * pageSize;
+        return new ServicePage<>(mapper.selectDeleted(offset, pageSize, keyword), mapper.countDeleted(keyword));
     }
 
     public ContentTag create(String name, String status, BigDecimal heatScore) {
@@ -48,10 +55,27 @@ public class ContentTagService {
 
     public void delete(long id) {
         ContentTag tag = require(id);
-        if (mapper.countVideoReferences(id) > 0) {
-            throw new BusinessException("TAG_IN_USE", HttpStatus.CONFLICT, "标签已被视频使用，无法删除");
+        long refCount = mapper.countVideoReferences(id);
+        if (refCount > 0) {
+            throw new BusinessException("TAG_IN_USE", HttpStatus.CONFLICT,
+                    "标签已被 " + refCount + " 个视频引用，删除后这些视频将失去该标签关联。如仍需删除请先移除视频的标签关联");
         }
         mapper.deleteById(tag.getId());
+    }
+
+    /** Restore a soft-deleted tag back to active. */
+    public ContentTag restore(long id) {
+        int rows = mapper.restoreById(id);
+        if (rows == 0) {
+            throw new BusinessException("TAG_NOT_FOUND", HttpStatus.NOT_FOUND, "标签不存在或未被删除");
+        }
+        // Check name conflict with existing active tags
+        ContentTag restored = mapper.selectById(id);
+        if (restored != null && mapper.countActiveByName(restored.getName()) > 1) {
+            throw new BusinessException("TAG_NAME_CONFLICT", HttpStatus.CONFLICT,
+                    "已存在同名标签「" + restored.getName() + "」，请先重命名后再恢复");
+        }
+        return restored;
     }
 
     private ContentTag require(long id) {

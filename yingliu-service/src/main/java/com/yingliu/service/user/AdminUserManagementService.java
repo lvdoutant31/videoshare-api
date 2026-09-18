@@ -5,6 +5,7 @@ import com.yingliu.service.content.shared.ServicePage;
 import java.time.LocalDateTime;
 import java.util.List;
 
+/** 用户治理契约，定义用户查询、处罚、恢复与审计操作。 */
 public interface AdminUserManagementService {
     ServicePage<UserSummary> list(UserQuery query);
     UserDetail get(long userId);

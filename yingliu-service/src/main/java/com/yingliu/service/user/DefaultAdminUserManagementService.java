@@ -28,6 +28,7 @@ import java.time.LocalDateTime;
 import java.util.Base64;
 import java.util.List;
 
+/** 用户治理事务实现，协调处罚记录、账号状态、确认令牌和审计记录。 */
 @Service
 public class DefaultAdminUserManagementService implements AdminUserManagementService {
     private static final SecureRandom TOKEN_RANDOM = new SecureRandom();

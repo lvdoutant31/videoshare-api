@@ -1,10 +1,11 @@
 package com.yingliu.api.admin.user;
 
+import com.yingliu.api.admin.log.OperLog;
 import com.yingliu.api.admin.content.shared.PageResponse;
 import com.yingliu.api.admin.security.AdminPermissionAuthorizer;
 import com.yingliu.common.api.ApiResponse;
 import com.yingliu.common.exception.BusinessException;
-import com.yingliu.common.web.TraceIdFilter;
+import com.yingliu.framework.web.TraceIdFilter;
 import com.yingliu.service.content.shared.ServicePage;
 import com.yingliu.service.user.AdminUserManagementService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -24,6 +25,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDateTime;
 
+/** 用户管理 HTTP 入口，将治理命令和操作者身份交由业务用例处理。 */
 @RestController
 @Validated
 @ConditionalOnBean(AdminUserManagementService.class)
@@ -55,18 +57,21 @@ public class AdminUserManagementController {
     }
 
     @PostMapping("/users/{userId}/mute")
+    @OperLog(module = "USER", action = "MUTE", targetType = "USER", detail = "禁言")
     public ApiResponse<UserManagementDtos.Detail> mute(@PathVariable String userId, @Valid @RequestBody UserManagementDtos.TemporaryPenalty body, HttpServletRequest request) {
         long actor = authorizer.require("user:mute");
         return ApiResponse.ok(detail(service.mute(new AdminUserManagementService.TemporaryPenaltyCommand(actor, id(userId), body.reason(), body.endsAt(), traceId(request)))), traceId(request));
     }
 
     @PostMapping("/users/{userId}/suspend")
+    @OperLog(module = "USER", action = "SUSPEND", targetType = "USER", detail = "临时封禁")
     public ApiResponse<UserManagementDtos.Detail> suspend(@PathVariable String userId, @Valid @RequestBody UserManagementDtos.TemporaryPenalty body, HttpServletRequest request) {
         long actor = authorizer.require("user:suspend");
         return ApiResponse.ok(detail(service.suspend(new AdminUserManagementService.TemporaryPenaltyCommand(actor, id(userId), body.reason(), body.endsAt(), traceId(request)))), traceId(request));
     }
 
     @PostMapping("/confirmations")
+    @OperLog(module = "USER", action = "CONFIRM", targetType = "USER", detail = "发起封禁确认")
     public ApiResponse<UserManagementDtos.ConfirmationView> confirmation(@Valid @RequestBody UserManagementDtos.ConfirmationRequest body, HttpServletRequest request) {
         long actor = authorizer.require("user:ban");
         if (!"USER_BAN".equals(body.action()) || !"USER".equals(body.targetType())) throw validation();
@@ -75,18 +80,21 @@ public class AdminUserManagementController {
     }
 
     @PostMapping("/users/{userId}/ban")
+    @OperLog(module = "USER", action = "BAN", targetType = "USER", detail = "永久封禁")
     public ApiResponse<UserManagementDtos.Detail> ban(@PathVariable String userId, @Valid @RequestBody UserManagementDtos.Ban body, HttpServletRequest request) {
         long actor = authorizer.require("user:ban");
         return ApiResponse.ok(detail(service.ban(new AdminUserManagementService.BanCommand(actor, id(userId), body.reason(), body.confirmationToken(), traceId(request)))), traceId(request));
     }
 
     @PostMapping("/users/{userId}/penalties/{penaltyId}/revoke")
+    @OperLog(module = "USER", action = "REVOKE", targetType = "USER", detail = "撤销处罚")
     public ApiResponse<UserManagementDtos.Detail> revoke(@PathVariable String userId, @PathVariable String penaltyId, @Valid @RequestBody UserManagementDtos.Reason body, HttpServletRequest request) {
         long actor = authorizer.require("user:penalty:revoke");
         return ApiResponse.ok(detail(service.revokePenalty(new AdminUserManagementService.RevokePenaltyCommand(actor, id(userId), id(penaltyId), body.reason(), traceId(request)))), traceId(request));
     }
 
     @PostMapping("/users/{userId}/wecom-binding/unbind")
+    @OperLog(module = "USER", action = "UNBIND", targetType = "USER", detail = "解绑企微")
     public ApiResponse<UserManagementDtos.Detail> unbind(@PathVariable String userId, @Valid @RequestBody UserManagementDtos.Reason body, HttpServletRequest request) {
         long actor = authorizer.require("user:wecom:unbind");
         return ApiResponse.ok(detail(service.unbindWeCom(new AdminUserManagementService.UnbindWeComCommand(actor, id(userId), body.reason(), traceId(request)))), traceId(request));

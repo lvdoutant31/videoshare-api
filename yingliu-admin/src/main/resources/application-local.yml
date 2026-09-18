@@ -1,0 +1,44 @@
+# 本地开发：从工程根目录加载 .env；不要把该文件提交到版本库。
+spring:
+  config:
+    activate:
+      on-profile: local
+    import: optional:file:.env[.properties]
+  datasource:
+    url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:yingliu-db}?useUnicode=true&characterEncoding=utf8&connectionTimeZone=UTC
+    username: ${MYSQL_USER:root}
+    password: ${MYSQL_PASSWORD}
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+  flyway:
+    enabled: ${FLYWAY_ENABLED:true}
+    # 延续原工程接入已有数据库时的基线，禁止更改已发布迁移脚本。
+    baseline-on-migrate: true
+    baseline-version: 202608271200
+yingliu:
+  admin:
+    # 延续本地调试默认值；生产配置固定关闭。
+    auth-disabled: ${YINGLIU_ADMIN_AUTH_DISABLED:true}
+    auth-bypass-admin-id: ${YINGLIU_ADMIN_AUTH_BYPASS_ADMIN_ID:9000001}
+    cors:
+      allowed-origin: ${YINGLIU_ADMIN_CORS_ALLOWED_ORIGIN:}
+  local:
+    seed:
+      enabled: ${YINGLIU_LOCAL_SEED_ENABLED:false}
+  wecom:
+    cookie-secure: ${WECOM_COOKIE_SECURE:false}
+media:
+  storage-root: ${MEDIA_ROOT:document/media}
+  storage-type: ${MEDIA_STORAGE_TYPE:local}
+  # Nginx serves MEDIA_ROOT directly. Use a same-origin URL so LAN clients do
+  # not resolve localhost to their own device.
+  local-url-prefix: ${MEDIA_LOCAL_URL_PREFIX:/media}
+mybatis-plus:
+  configuration:
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
+logging:
+  level:
+    com.yingliu.domain: DEBUG

@@ -13,6 +13,7 @@ import com.yingliu.domain.content.video.VideoAuthor;
 import com.yingliu.domain.content.video.VideoCategoryMap;
 import com.yingliu.domain.content.video.VideoTagMap;
 import com.yingliu.domain.content.video.VideoPublishSchedule;
+import com.yingliu.media.storage.MediaStorage;
 import com.yingliu.service.content.category.mapper.ContentCategoryMapper;
 import com.yingliu.service.content.shared.ServicePage;
 import com.yingliu.service.content.tag.mapper.ContentTagMapper;
@@ -36,6 +37,7 @@ import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+/** 视频管理事务实现，协调媒体、分类标签、审核记录和发布计划的状态变化。 */
 @Service
 @Profile("!test")
 public class DefaultVideoAdminService implements VideoAdminService {
@@ -49,12 +51,14 @@ public class DefaultVideoAdminService implements VideoAdminService {
     private final VideoTagMapMapper tagMapMapper;
     private final VideoAuditRecordMapper auditRecordMapper;
     private final VideoPublishScheduleMapper publishScheduleMapper;
+    private final MediaStorage mediaStorage;
 
     public DefaultVideoAdminService(VideoMapper videoMapper, MediaResourceMapper mediaMapper,
                                     VideoAuthorMapper authorMapper, AdminUserMapper adminUserMapper,
                                     ContentCategoryMapper categoryMapper, ContentTagMapper tagMapper,
                                     VideoCategoryMapMapper categoryMapMapper, VideoTagMapMapper tagMapMapper,
-                                    VideoAuditRecordMapper auditRecordMapper, VideoPublishScheduleMapper publishScheduleMapper) {
+                                    VideoAuditRecordMapper auditRecordMapper, VideoPublishScheduleMapper publishScheduleMapper,
+                                    MediaStorage mediaStorage) {
         this.videoMapper = videoMapper;
         this.mediaMapper = mediaMapper;
         this.authorMapper = authorMapper;
@@ -65,6 +69,7 @@ public class DefaultVideoAdminService implements VideoAdminService {
         this.tagMapMapper = tagMapMapper;
         this.auditRecordMapper = auditRecordMapper;
         this.publishScheduleMapper = publishScheduleMapper;
+        this.mediaStorage = mediaStorage;
     }
 
     @Override
@@ -98,7 +103,10 @@ public class DefaultVideoAdminService implements VideoAdminService {
         List<Long> categoryIds = validateIds(command.categoryIds(), 1, 3, "分类");
         List<Long> tagIds = validateIds(command.tagIds(), 0, 10, "标签");
         requireEligibleCategories(categoryIds); requireEligibleTags(tagIds);
-        if (videoMapper.updateMetadata(videoId, actorAdminId, video.getCurrentVersion(), title, description, visibility) != 1) throw stateConflict();
+        Long originalMediaId = command.originalMediaId();
+        if (originalMediaId != null) requireMedia(originalMediaId, "VIDEO_ORIGINAL");
+        if (videoMapper.updateMetadata(videoId, actorAdminId, video.getCurrentVersion(), title, description,
+                visibility, originalMediaId == null ? video.getOriginalMediaId() : originalMediaId) != 1) throw stateConflict();
         categoryMapMapper.delete(new LambdaQueryWrapper<VideoCategoryMap>().eq(VideoCategoryMap::getVideoId, videoId));
         tagMapMapper.delete(new LambdaQueryWrapper<VideoTagMap>().eq(VideoTagMap::getVideoId, videoId));
         categoryIds.forEach(id -> categoryMapMapper.insert(new VideoCategoryMap(videoId, id)));
@@ -126,8 +134,7 @@ public class DefaultVideoAdminService implements VideoAdminService {
     @Override
     @Transactional
     public VideoDetail createDraft(CreateDraftCommand command) {
-        requireNormalAdmin(command.actorAdminId());
-        requireEligibleAuthor(command.authorId());
+        long authorId = currentAuthorId(command.actorAdminId());
         requireMedia(command.originalMediaId(), "VIDEO_ORIGINAL");
         if (command.coverMediaId() != null) requireMedia(command.coverMediaId(), "COVER");
         List<Long> categoryIds = validateIds(command.categoryIds(), 1, 3, "分类");
@@ -136,14 +143,14 @@ public class DefaultVideoAdminService implements VideoAdminService {
         requireEligibleTags(tagIds);
 
         Video video = new Video();
-        video.setAuthorId(command.authorId());
+        video.setAuthorId(authorId);
         video.setOriginalMediaId(command.originalMediaId());
         video.setCoverMediaId(command.coverMediaId());
         video.setTitle(requireText(command.title(), 120, "视频标题不能为空"));
         video.setDescription(normalizeOptional(command.description(), 2000, "视频简介最多 2000 个字符"));
         video.setSourceNote(normalizeOptional(command.sourceNote(), 128, "来源说明最多 128 个字符"));
         video.setVisibility(normalizeVisibility(command.visibility()));
-        video.setAuditStatus("DRAFT");
+        video.setAuditStatus("APPROVED");
         video.setPublishStatus("UNPUBLISHED");
         video.setRiskLevel("NONE");
         video.setManualWeight(0);
@@ -153,6 +160,15 @@ public class DefaultVideoAdminService implements VideoAdminService {
         videoMapper.insert(video);
         categoryIds.forEach(categoryId -> categoryMapMapper.insert(new VideoCategoryMap(video.getId(), categoryId)));
         tagIds.forEach(tagId -> tagMapMapper.insert(new VideoTagMap(video.getId(), tagId)));
+        // Admin-created videos are auto-approved — no manual review required
+        VideoAuditRecord autoApprove = new VideoAuditRecord();
+        autoApprove.setVideoId(video.getId());
+        autoApprove.setVideoVersion(video.getCurrentVersion());
+        autoApprove.setReviewerAdminId(command.actorAdminId());
+        autoApprove.setAction("AUTO_APPROVED");
+        autoApprove.setReason("管理员创建，免审核");
+        autoApprove.setReviewedAt(java.time.LocalDateTime.now());
+        auditRecordMapper.insert(autoApprove);
         return detail(video);
     }
 
@@ -288,6 +304,19 @@ public class DefaultVideoAdminService implements VideoAdminService {
 
     @Override
     @Transactional
+    public BatchOperationResult batchDelete(List<Long> videoIds, long actorAdminId, String reason) {
+        requireNormalAdmin(actorAdminId);
+        String normalizedReason = requireText(reason, 512, "删除原因不能为空");
+        return batch(videoIds, id -> {
+            requireVideo(id);
+            if (videoMapper.deleteVideo(id, actorAdminId) != 1) throw stateConflict();
+            publishScheduleMapper.cancelActiveByVideoId(id);
+            return true;
+        });
+    }
+
+    @Override
+    @Transactional
     public void retryTranscode(long videoId, String profile, long actorAdminId) {
         requireNormalAdmin(actorAdminId);
         requireVideo(videoId);
@@ -387,12 +416,28 @@ public class DefaultVideoAdminService implements VideoAdminService {
         return video;
     }
 
-    private void requireNormalAdmin(long id) {
-        AdminUser admin = adminUserMapper.selectById(id);
+    @Override
+    @Transactional
+    public long currentAuthorId(long actorAdminId) {
+        // Serialize first-time binding so concurrent uploads share one author profile.
+        AdminUser admin = requireNormalAdmin(adminUserMapper.selectForAuthorBinding(actorAdminId));
+        if (admin.getUserId() != null) return requireEligibleAuthor(admin.getUserId()).getId();
+        long authorId = com.baomidou.mybatisplus.core.toolkit.IdWorker.getId();
+        if (authorMapper.insertAdminAuthor(authorId, admin.getUsername()) != 1
+                || adminUserMapper.bindAuthor(actorAdminId, authorId) != 1) throw stateConflict();
+        return authorId;
+    }
+
+    private AdminUser requireNormalAdmin(long id) {
+        return requireNormalAdmin(adminUserMapper.selectById(id));
+    }
+
+    private AdminUser requireNormalAdmin(AdminUser admin) {
         if (admin == null) throw new BusinessException("ADMIN_NOT_FOUND", HttpStatus.NOT_FOUND, "后台账号不存在");
         if (!"NORMAL".equals(admin.getStatus())) {
             throw new BusinessException("ADMIN_NOT_ELIGIBLE", HttpStatus.UNPROCESSABLE_ENTITY, "后台账号不可用");
         }
+        return admin;
     }
 
     private VideoAuthor requireEligibleAuthor(long id) {
@@ -491,7 +536,9 @@ public class DefaultVideoAdminService implements VideoAdminService {
 
     private MediaView mediaView(MediaResource media) {
         return new MediaView(media.getId(), media.getResourceType(), media.getContentType(), media.getFileSize(),
-                media.getWidth(), media.getHeight(), media.getDurationMs());
+                media.getWidth(), media.getHeight(), media.getDurationMs(),
+                media.getUrl() != null ? media.getUrl()
+                        : media.getRelativePath() != null ? mediaStorage.getUrl(media.getRelativePath()) : null);
     }
 
     private BusinessException stateConflict() {

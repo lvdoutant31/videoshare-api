@@ -8,6 +8,8 @@ import com.yingliu.domain.content.video.Video;
 import com.yingliu.domain.content.video.VideoAuthor;
 import com.yingliu.domain.content.video.VideoStats;
 import com.yingliu.domain.content.video.VideoTagMap;
+import com.yingliu.media.storage.MediaStorage;
+import com.yingliu.service.app.AppInteractionService;
 import com.yingliu.service.content.shared.CursorPage;
 import com.yingliu.service.content.tag.mapper.ContentTagMapper;
 import com.yingliu.service.content.video.mapper.MediaResourceMapper;
@@ -26,9 +28,11 @@ import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+/** 面向手机端组装公开视频数据，查询内容并补充作者、标签和观看者状态。 */
 @Service
 @Profile("!test")
 public class DefaultVideoAppService implements VideoAppService {
@@ -38,23 +42,40 @@ public class DefaultVideoAppService implements VideoAppService {
     private final VideoStatsMapper statsMapper;
     private final VideoTagMapMapper tagMapMapper;
     private final ContentTagMapper tagMapper;
+    private final MediaStorage mediaStorage;
+    private final AppInteractionService interactionService;
 
     public DefaultVideoAppService(VideoMapper videoMapper, VideoAuthorMapper authorMapper,
                                   MediaResourceMapper mediaMapper, VideoStatsMapper statsMapper,
-                                  VideoTagMapMapper tagMapMapper, ContentTagMapper tagMapper) {
+                                  VideoTagMapMapper tagMapMapper, ContentTagMapper tagMapper,
+                                  MediaStorage mediaStorage, AppInteractionService interactionService) {
         this.videoMapper = videoMapper;
         this.authorMapper = authorMapper;
         this.mediaMapper = mediaMapper;
         this.statsMapper = statsMapper;
         this.tagMapMapper = tagMapMapper;
         this.tagMapper = tagMapper;
+        this.mediaStorage = mediaStorage;
+        this.interactionService = interactionService;
     }
 
     @Override
-    public CursorPage<FeedItem> recommend(String cursor, int limit) {
+    public CursorPage<FeedItem> recommend(String cursor, int limit, Long viewerId) {
         Cursor value = decodeCursor(cursor);
         List<Video> rows = videoMapper.selectPublicFeed(value == null ? null : value.publishedAt(),
                 value == null ? null : value.videoId(), limit + 1);
+        return assemblePage(rows, limit, viewerId);
+    }
+
+    @Override
+    public CursorPage<FeedItem> following(String cursor, int limit, long viewerId) {
+        Cursor value = decodeCursor(cursor);
+        List<Video> rows = videoMapper.selectFollowingFeed(viewerId, value == null ? null : value.publishedAt(),
+                value == null ? null : value.videoId(), limit + 1);
+        return assemblePage(rows, limit, viewerId);
+    }
+
+    private CursorPage<FeedItem> assemblePage(List<Video> rows, int limit, Long viewerId) {
         boolean hasNext = rows.size() > limit;
         List<Video> videos = hasNext ? rows.subList(0, limit) : rows;
         Map<Long, VideoAuthor> authors = authors(videos.stream().map(Video::getAuthorId).toList());
@@ -62,16 +83,26 @@ public class DefaultVideoAppService implements VideoAppService {
         Map<Long, MediaResource> covers = covers(videos);
         Map<Long, VideoStats> stats = stats(videos.stream().map(Video::getId).toList());
         Map<Long, List<Tag>> tags = tags(videos.stream().map(Video::getId).toList());
-        List<FeedItem> items = videos.stream().map(video -> feedItem(video, authors.get(video.getAuthorId()),
-                originals.get(video.getOriginalMediaId()), covers.get(video.getCoverMediaId()), stats.get(video.getId()),
-                tags.getOrDefault(video.getId(), List.of())))
+        List<Long> videoIds = videos.stream().map(Video::getId).toList();
+        Set<Long> likedIds = viewerId == null ? Set.of() : interactionService.likedVideoIds(viewerId, videoIds);
+        Set<Long> favoritedIds = viewerId == null ? Set.of() : interactionService.favoritedVideoIds(viewerId, videoIds);
+        Set<Long> followingIds = viewerId == null ? Set.of()
+                : interactionService.followingIds(viewerId, videos.stream().map(Video::getAuthorId).toList());
+        List<FeedItem> items = videos.stream().map(video -> feedItem(video,
+                        video.getAuthorId() != null ? authors.getOrDefault(video.getAuthorId(), null) : null,
+                        video.getOriginalMediaId() != null ? originals.getOrDefault(video.getOriginalMediaId(), null) : null,
+                        video.getCoverMediaId() != null ? covers.getOrDefault(video.getCoverMediaId(), null) : null,
+                        stats.getOrDefault(video.getId(), null),
+                        tags.getOrDefault(video.getId(), List.of()),
+                        new ViewerState(likedIds.contains(video.getId()), favoritedIds.contains(video.getId())),
+                        followingIds.contains(video.getAuthorId())))
                 .toList();
         String nextCursor = hasNext ? encodeCursor(videos.get(videos.size() - 1)) : null;
         return new CursorPage<>(items, nextCursor);
     }
 
     @Override
-    public VideoDetail getPublicVideo(long videoId) {
+    public VideoDetail getPublicVideo(long videoId, Long viewerId) {
         Video video = videoMapper.selectPublicById(videoId);
         if (video == null) throw notFound();
         VideoAuthor author = authorMapper.selectById(video.getAuthorId());
@@ -82,15 +113,22 @@ public class DefaultVideoAppService implements VideoAppService {
         }
         MediaResource cover = cover(video.getCoverMediaId());
         VideoStats stats = statsMapper.selectById(video.getId());
+        boolean liked = viewerId != null && interactionService.likedVideoIds(viewerId, List.of(video.getId())).contains(video.getId());
+        boolean favorited = viewerId != null && interactionService.favoritedVideoIds(viewerId, List.of(video.getId())).contains(video.getId());
+        boolean following = viewerId != null && interactionService.isFollowing(viewerId, video.getAuthorId());
         return new VideoDetail(video.getId(), author.getId(), author.getNickname(), video.getTitle(), video.getDescription(),
-                original.getDurationMs(), cover(cover), tags(List.of(video.getId())).getOrDefault(video.getId(), List.of()), stats(stats),
-                video.getPublishedAt());
+                original.getDurationMs(),
+                url(original),
+                cover(cover), tags(List.of(video.getId())).getOrDefault(video.getId(), List.of()), stats(stats),
+                video.getPublishedAt(), new ViewerState(liked, favorited), following);
     }
 
     private FeedItem feedItem(Video video, VideoAuthor author, MediaResource original, MediaResource cover,
-                              VideoStats stats, List<Tag> tags) {
+                              VideoStats stats, List<Tag> tags, ViewerState state, boolean authorFollowing) {
+        String videoUrl = url(original);
         return new FeedItem(video.getId(), author.getId(), author.getNickname(), video.getTitle(), video.getDescription(),
-                original == null ? null : original.getDurationMs(), cover(cover), tags, stats(stats), video.getPublishedAt());
+                original == null ? null : original.getDurationMs(), videoUrl, cover(cover), tags, stats(stats),
+                video.getPublishedAt(), state, authorFollowing);
     }
 
     private Map<Long, VideoAuthor> authors(Collection<Long> ids) {
@@ -141,7 +179,16 @@ public class DefaultVideoAppService implements VideoAppService {
     }
 
     private Cover cover(MediaResource media) {
-        return media == null ? null : new Cover(media.getId(), media.getContentType(), media.getWidth(), media.getHeight());
+        return media == null ? null : new Cover(media.getId(), media.getContentType(), media.getWidth(), media.getHeight(),
+                url(media));
+    }
+
+    private String url(MediaResource media) {
+        if (media == null) return null;
+        // Rebuild the public URL from the storage key when possible. Persisted
+        // absolute URLs may contain a development-only host such as localhost.
+        return media.getRelativePath() != null ? mediaStorage.getUrl(media.getRelativePath())
+                : media.getUrl();
     }
 
     private Stats stats(VideoStats value) {

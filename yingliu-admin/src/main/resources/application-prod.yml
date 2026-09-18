@@ -1,0 +1,29 @@
+# 生产环境：通过运行环境注入连接信息和密钥，不导入本地 .env。
+spring:
+  config:
+    activate:
+      on-profile: prod
+  datasource:
+    url: jdbc:mysql://${MYSQL_HOST:mysql}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:yingliu-db}?useUnicode=true&characterEncoding=utf8&connectionTimeZone=UTC
+    username: ${MYSQL_USER:root}
+    password: ${MYSQL_PASSWORD}
+  data:
+    redis:
+      host: ${REDIS_HOST:redis}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+  flyway:
+    enabled: ${FLYWAY_ENABLED:true}
+yingliu:
+  app:
+    phone-login-enabled: false
+  wecom:
+    mock-enabled: false
+    cookie-secure: true
+  admin:
+    auth-disabled: false
+    auth-bypass-admin-id: 9000001
+    authorization-enabled: ${YINGLIU_ADMIN_AUTHORIZATION_ENABLED:true}
+media:
+  storage-root: ${MEDIA_ROOT:/app/document/media}
+  storage-type: ${MEDIA_STORAGE_TYPE:oss}

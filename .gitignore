@@ -1,36 +1,11 @@
-# Java
 **/target/
 *.class
 *.jar
-*.war
-
-# Node
-node_modules/
-.pnpm-store/
-**/dist/
-**/.vite/
-coverage/
-*.tsbuildinfo
-
-# Local configuration and runtime data
 .env
 .env.local
-!.env.example
-media/
-data/
-logs/
-tmp/
-*.log
-
-# Local development tools
-.claude/
-.codebase-memory/
-.superpowers/
-\{.mvn/
-
-# IDE and OS
 .idea/
-.vscode/
 *.iml
-.DS_Store
-Thumbs.db
+logs/
+*.log
+/document/media/
+.superpowers/

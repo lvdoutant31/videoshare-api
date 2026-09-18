@@ -1,9 +1,10 @@
 package com.yingliu.api.admin.content.video;
 
+import com.yingliu.api.admin.log.OperLog;
 import com.yingliu.api.admin.content.shared.PageResponse;
-import com.yingliu.api.admin.security.AdminActorProvider;
+import com.yingliu.api.admin.security.AdminPermissionAuthorizer;
 import com.yingliu.common.api.ApiResponse;
-import com.yingliu.common.web.TraceIdFilter;
+import com.yingliu.framework.web.TraceIdFilter;
 import com.yingliu.service.content.shared.ServicePage;
 import com.yingliu.service.content.video.VideoAdminService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -23,17 +24,18 @@ import org.springframework.web.bind.annotation.RestController;
 import java.time.LocalDateTime;
 import java.util.List;
 
+/** 视频审核 HTTP 入口：将审核版本、处理人和意见传递给审核业务。 */
 @RestController
 @Validated
 @ConditionalOnBean(VideoAdminService.class)
 @RequestMapping("/api/v1/admin/reviews/videos")
 public class AdminVideoReviewController {
     private final VideoAdminService service;
-    private final AdminActorProvider actorProvider;
+    private final AdminPermissionAuthorizer authorizer;
 
-    public AdminVideoReviewController(VideoAdminService service, AdminActorProvider actorProvider) {
+    public AdminVideoReviewController(VideoAdminService service, AdminPermissionAuthorizer authorizer) {
         this.service = service;
-        this.actorProvider = actorProvider;
+        this.authorizer = authorizer;
     }
 
     @GetMapping
@@ -44,6 +46,7 @@ public class AdminVideoReviewController {
             @RequestParam(required = false) Long authorId,
             @RequestParam(required = false) String riskLevel,
             HttpServletRequest request) {
+        authorizer.require("review:view");
         ServicePage<VideoAdminService.ReviewQueueItem> result = service.listReviewQueue(
                 new VideoAdminService.ReviewQueueQuery(page, pageSize, keyword, authorId, riskLevel));
         return ApiResponse.ok(new PageResponse<>(result.items().stream().map(this::queueItem).toList(), page, pageSize,
@@ -52,36 +55,42 @@ public class AdminVideoReviewController {
 
     @GetMapping("/{videoId}")
     public ApiResponse<VideoDtos.Detail> get(@PathVariable long videoId, HttpServletRequest request) {
+        authorizer.require("review:view");
         return ApiResponse.ok(detail(service.get(videoId)), traceId(request));
     }
 
     @PostMapping("/{videoId}/claim")
+    @OperLog(module = "REVIEW", action = "CLAIM", targetType = "VIDEO", detail = "认领审核")
     public ApiResponse<VideoDtos.Detail> claim(@PathVariable long videoId, @Valid @RequestBody VideoDtos.Claim body, HttpServletRequest request) {
-        return ApiResponse.ok(detail(service.claimReview(videoId, actorProvider.currentAdminId(), body.version())), traceId(request));
+        return ApiResponse.ok(detail(service.claimReview(videoId, authorizer.require("review:claim"), body.version())), traceId(request));
     }
 
     @PostMapping("/{videoId}/request-revision")
+    @OperLog(module = "REVIEW", action = "REQUEST_REVISION", targetType = "VIDEO", detail = "要求修改")
     public ApiResponse<VideoDtos.Detail> requestRevision(@PathVariable long videoId, @Valid @RequestBody VideoDtos.RequestRevision body, HttpServletRequest request) {
-        return ApiResponse.ok(detail(service.requestRevision(videoId, actorProvider.currentAdminId(), body.currentVersion(), body.reason())), traceId(request));
+        return ApiResponse.ok(detail(service.requestRevision(videoId, authorizer.require("review:decide"), body.currentVersion(), body.reason())), traceId(request));
     }
 
 
     @PostMapping("/{videoId}/approve")
+    @OperLog(module = "REVIEW", action = "APPROVE", targetType = "VIDEO", detail = "审核通过")
     public ApiResponse<VideoDtos.Detail> approve(@PathVariable long videoId, @Valid @RequestBody VideoDtos.ApproveReview body,
                                                    HttpServletRequest request) {
-        return ApiResponse.ok(detail(service.approveReview(videoId, actorProvider.currentAdminId(), body.currentVersion(),
+        return ApiResponse.ok(detail(service.approveReview(videoId, authorizer.require("review:decide"), body.currentVersion(),
                 body.reason())), traceId(request));
     }
 
     @PostMapping("/{videoId}/reject")
+    @OperLog(module = "REVIEW", action = "REJECT", targetType = "VIDEO", detail = "审核驳回")
     public ApiResponse<VideoDtos.Detail> reject(@PathVariable long videoId, @Valid @RequestBody VideoDtos.RejectReview body,
                                                   HttpServletRequest request) {
-        return ApiResponse.ok(detail(service.rejectReview(videoId, actorProvider.currentAdminId(), body.currentVersion(),
+        return ApiResponse.ok(detail(service.rejectReview(videoId, authorizer.require("review:decide"), body.currentVersion(),
                 body.reason())), traceId(request));
     }
 
     @GetMapping("/{videoId}/history")
     public ApiResponse<List<VideoDtos.AuditHistoryItem>> history(@PathVariable long videoId, HttpServletRequest request) {
+        authorizer.require("review:view");
         return ApiResponse.ok(service.auditHistory(videoId).stream().map(this::historyItem).toList(), traceId(request));
     }
 
@@ -108,7 +117,7 @@ public class AdminVideoReviewController {
     private VideoDtos.MediaView media(VideoAdminService.MediaView item) {
         if (item == null) return null;
         return new VideoDtos.MediaView(String.valueOf(item.id()), item.resourceType(), item.contentType(), item.fileSize(),
-                item.width(), item.height(), item.durationMs());
+                item.width(), item.height(), item.durationMs(), item.url());
     }
 
     private String time(LocalDateTime value) { return value == null ? null : value.toString(); }

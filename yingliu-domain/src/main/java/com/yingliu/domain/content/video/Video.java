@@ -9,6 +9,7 @@ import com.baomidou.mybatisplus.annotation.TableName;
 
 import java.time.LocalDateTime;
 
+/** 视频主记录，分别保存审核和发布状态；状态转换由视频业务用例执行。 */
 @TableName("video")
 public class Video {
     @TableId(type = IdType.ASSIGN_ID)

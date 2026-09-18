@@ -8,6 +8,7 @@ import com.baomidou.mybatisplus.annotation.TableName;
 
 import java.time.LocalDateTime;
 
+/** 视频定时发布计划，记录预定时间与任务处理状态。 */
 @TableName("video_publish_schedule")
 public class VideoPublishSchedule {
     @TableId(type = IdType.ASSIGN_ID)

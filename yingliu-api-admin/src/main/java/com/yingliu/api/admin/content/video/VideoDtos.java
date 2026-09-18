@@ -11,7 +11,7 @@ import java.util.List;
 public final class VideoDtos {
     private VideoDtos() { }
 
-    public record CreateDraft(@NotBlank String authorId, @NotBlank String originalMediaId, String coverMediaId,
+    public record CreateDraft(String authorId, @NotBlank String originalMediaId, String coverMediaId,
                               @NotBlank @Size(max = 120) String title, @Size(max = 2000) String description,
                               @Size(max = 128) String sourceNote, List<@NotBlank String> categoryIds,
                               List<@NotBlank String> tagIds, String visibility) { }
@@ -28,7 +28,7 @@ public final class VideoDtos {
                                 @Size(max = 512) String reason) { }
 
     public record MediaView(String id, String resourceType, String contentType, long fileSize, Integer width,
-                            Integer height, Integer durationMs) { }
+                            Integer height, Integer durationMs, String url) { }
     public record CategoryView(String id, String name) { }
     public record TagView(String id, String name) { }
     public record Summary(String id, String authorId, String authorNickname, String title, String auditStatus,

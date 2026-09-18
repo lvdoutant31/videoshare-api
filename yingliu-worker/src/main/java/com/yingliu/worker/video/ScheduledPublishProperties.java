@@ -4,6 +4,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 
 import java.time.Duration;
 
+/** 定时发布任务配置：批量大小为条数，扫描间隔与处理超时分别控制轮询和恢复。 */
 @ConfigurationProperties("yingliu.worker.scheduled-publish")
 public class ScheduledPublishProperties {
     private int batchSize = 50;

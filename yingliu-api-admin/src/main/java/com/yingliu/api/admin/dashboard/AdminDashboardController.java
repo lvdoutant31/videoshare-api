@@ -2,11 +2,12 @@ package com.yingliu.api.admin.dashboard;
 
 import com.yingliu.api.admin.security.AdminPermissionAuthorizer;
 import com.yingliu.common.api.ApiResponse;
-import com.yingliu.common.web.TraceIdFilter;
+import com.yingliu.framework.web.TraceIdFilter;
 import com.yingliu.service.dashboard.DashboardService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.web.bind.annotation.*;
 
+/** 管理端概览数据入口，统一包装看板查询结果。 */
 @RestController
 @RequestMapping("/api/v1/admin/dashboard")
 public class AdminDashboardController {

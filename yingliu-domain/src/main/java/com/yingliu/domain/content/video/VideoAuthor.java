@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableLogic;
 import com.baomidou.mybatisplus.annotation.TableName;
 
+/** 作者资料映射，用于视频归属、展示与作者状态校验。 */
 @TableName("sys_user")
 public class VideoAuthor {
     @TableId

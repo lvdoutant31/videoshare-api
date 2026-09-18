@@ -7,6 +7,7 @@ import com.baomidou.mybatisplus.annotation.TableName;
 
 import java.time.LocalDateTime;
 
+/** 管理端用户资料映射，供用户查询和账号治理使用。 */
 @TableName("sys_user")
 public class ManagedUser {
     @TableId

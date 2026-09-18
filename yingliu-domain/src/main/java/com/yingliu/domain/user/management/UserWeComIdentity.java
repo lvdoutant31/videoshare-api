@@ -8,11 +8,22 @@ import com.baomidou.mybatisplus.annotation.TableName;
 
 import java.time.LocalDateTime;
 
+/** 用户与企微身份的绑定关系及绑定时间记录。 */
 @TableName("sys_user_wecom_identity")
 public class UserWeComIdentity {
     @TableId(type = IdType.ASSIGN_ID)
     private Long id;
     private Long userId;
+    private String corpId;
+    private byte[] wecomUserIdCiphertext;
+    private String wecomUserIdHmac;
+
+    public String getCorpId() { return corpId; }
+    public void setCorpId(String value) { corpId = value; }
+    public byte[] getWecomUserIdCiphertext() { return wecomUserIdCiphertext; }
+    public void setWecomUserIdCiphertext(byte[] value) { wecomUserIdCiphertext = value; }
+    public String getWecomUserIdHmac() { return wecomUserIdHmac; }
+    public void setWecomUserIdHmac(String value) { wecomUserIdHmac = value; }
     private String displayName;
     private String bindStatus;
     private LocalDateTime boundAt;

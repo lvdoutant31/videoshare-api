@@ -14,5 +14,5 @@ public final class TagDtos {
     public record Update(@Size(max = 64) String name, String status,
                          @DecimalMin("0") BigDecimal heatScore) { }
     public record View(String id, String name, String status, BigDecimal heatScore,
-                       String createdAt, String updatedAt) { }
+                       int deleted, String createdAt, String updatedAt) { }
 }

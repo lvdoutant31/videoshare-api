@@ -8,6 +8,7 @@ import com.baomidou.mybatisplus.annotation.TableName;
 
 import java.time.LocalDateTime;
 
+/** 媒体资源记录，关联存储位置、文件元数据、可用状态和备份状态。 */
 @TableName("media_resource")
 public class MediaResource {
     @TableId(type = IdType.ASSIGN_ID)
@@ -15,6 +16,7 @@ public class MediaResource {
     private String resourceType;
     private String storageState;
     private String relativePath;
+    private String url;
     private String contentType;
     private Long fileSize;
     private String sha256;
@@ -38,6 +40,8 @@ public class MediaResource {
     public void setStorageState(String storageState) { this.storageState = storageState; }
     public String getRelativePath() { return relativePath; }
     public void setRelativePath(String relativePath) { this.relativePath = relativePath; }
+    public String getUrl() { return url; }
+    public void setUrl(String url) { this.url = url; }
     public String getContentType() { return contentType; }
     public void setContentType(String contentType) { this.contentType = contentType; }
     public Long getFileSize() { return fileSize; }

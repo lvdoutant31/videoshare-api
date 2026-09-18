@@ -7,6 +7,7 @@ import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
 
+/** 定时领取到期发布计划并执行业务发布，任务状态与恢复规则由视频用例维护。 */
 @Component
 @ConditionalOnProperty(prefix = "yingliu.worker.scheduled-publish", name = "enabled", havingValue = "true")
 public class ScheduledVideoPublishWorker {

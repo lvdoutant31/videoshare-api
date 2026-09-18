@@ -10,6 +10,7 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
+/** 分类维护用例，统一分类查询、排序和可用状态处理。 */
 @Service
 @Profile("!test")
 public class ContentCategoryService {
@@ -24,6 +25,12 @@ public class ContentCategoryService {
                 .orderByAsc(ContentCategory::getSort)
                 .orderByDesc(ContentCategory::getId));
         return new ServicePage<>(result.getRecords(), result.getTotal());
+    }
+
+    /** List soft-deleted categories (trash / recycle bin). */
+    public ServicePage<ContentCategory> listDeleted(long page, long pageSize, String keyword) {
+        long offset = (page - 1) * pageSize;
+        return new ServicePage<>(mapper.selectDeleted(offset, pageSize, keyword), mapper.countDeleted(keyword));
     }
 
     public ContentCategory create(String name, String icon, Integer sort, String status) {
@@ -48,10 +55,29 @@ public class ContentCategoryService {
 
     public void delete(long id) {
         ContentCategory category = require(id);
-        if (mapper.countVideoReferences(id) > 0) {
-            throw new BusinessException("CATEGORY_IN_USE", HttpStatus.CONFLICT, "分类已被视频使用，无法删除");
+        long refCount = mapper.countVideoReferences(id);
+        if (refCount > 0) {
+            // Logical delete still allowed — the category won't be visible to C-end users.
+            // But warn the admin that there are video references.
+            throw new BusinessException("CATEGORY_IN_USE", HttpStatus.CONFLICT,
+                    "分类已被 " + refCount + " 个视频引用，删除后这些视频将失去该分类关联。如仍需删除请先移除视频的分类关联");
         }
         mapper.deleteById(category.getId());
+    }
+
+    /** Restore a soft-deleted category back to active. */
+    public ContentCategory restore(long id) {
+        int rows = mapper.restoreById(id);
+        if (rows == 0) {
+            throw new BusinessException("CATEGORY_NOT_FOUND", HttpStatus.NOT_FOUND, "分类不存在或未被删除");
+        }
+        // Check name conflict with existing active categories
+        ContentCategory restored = mapper.selectById(id);
+        if (restored != null && mapper.countActiveByName(restored.getName()) > 1) {
+            throw new BusinessException("CATEGORY_NAME_CONFLICT", HttpStatus.CONFLICT,
+                    "已存在同名分类「" + restored.getName() + "」，请先重命名后再恢复");
+        }
+        return restored;
     }
 
     private ContentCategory require(long id) {

@@ -8,6 +8,7 @@ import com.baomidou.mybatisplus.annotation.TableName;
 
 import java.time.LocalDateTime;
 
+/** 用户治理审计记录，保存操作者、目标和操作前后快照。 */
 @TableName("sys_audit_log")
 public class UserGovernanceAuditLog {
     @TableId(type = IdType.ASSIGN_ID)

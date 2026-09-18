@@ -3,6 +3,7 @@ package com.yingliu.domain.content.video;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 
+/** 按视频累计的播放、点赞、收藏和评论计数。 */
 @TableName("video_stats")
 public class VideoStats {
     @TableId

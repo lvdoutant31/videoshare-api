@@ -1,0 +1,21 @@
+CREATE TABLE sys_operation_log (
+  id           BIGINT UNSIGNED NOT NULL,
+  trace_id     CHAR(32)        NOT NULL,
+  actor_id     BIGINT UNSIGNED NOT NULL,
+  actor_name   VARCHAR(64)     NOT NULL,
+  module       VARCHAR(32)     NOT NULL,
+  action       VARCHAR(64)     NOT NULL,
+  target_type  VARCHAR(32)     NOT NULL,
+  target_id    VARCHAR(64)     NOT NULL,
+  detail       VARCHAR(512)    NULL,
+  ip           VARCHAR(45)     NULL,
+  status       VARCHAR(16)     NOT NULL DEFAULT 'SUCCESS',
+  error_code   VARCHAR(64)     NULL,
+  duration_ms  INT UNSIGNED    NOT NULL DEFAULT 0,
+  created_at   DATETIME(3)     NOT NULL,
+  PRIMARY KEY (id),
+  KEY idx_actor_time (actor_id, created_at DESC),
+  KEY idx_module_time (module, created_at DESC),
+  KEY idx_target (target_type, target_id),
+  KEY idx_created_at (created_at DESC)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

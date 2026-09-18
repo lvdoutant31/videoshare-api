@@ -13,5 +13,5 @@ public final class CategoryDtos {
     public record Update(@Size(max = 64) String name, @Size(max = 128) String icon,
                          @Min(0) Integer sort, String status) { }
     public record View(String id, String name, String icon, int sort, String status,
-                       String createdAt, String updatedAt) { }
+                       int deleted, String createdAt, String updatedAt) { }
 }

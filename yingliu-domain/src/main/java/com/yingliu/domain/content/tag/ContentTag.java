@@ -10,6 +10,7 @@ import com.baomidou.mybatisplus.annotation.TableName;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
+/** 内容标签记录，保存标签展示信息和维护状态。 */
 @TableName("content_tag")
 public class ContentTag {
     @TableId(type = IdType.ASSIGN_ID)

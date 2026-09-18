@@ -8,6 +8,7 @@ import com.baomidou.mybatisplus.annotation.TableName;
 
 import java.time.LocalDateTime;
 
+/** 用户处罚记录，保存类型、生效范围、处理人和撤销信息。 */
 @TableName("user_penalty")
 public class UserPenalty {
     @TableId(type = IdType.ASSIGN_ID)

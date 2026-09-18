@@ -8,6 +8,7 @@ import com.baomidou.mybatisplus.annotation.TableName;
 
 import java.time.LocalDateTime;
 
+/** 视频审核历史，保留被审核版本、处理人、处理意见及时间。 */
 @TableName("video_audit_record")
 public class VideoAuditRecord {
     @TableId(type = IdType.ASSIGN_ID)

@@ -9,6 +9,7 @@ import com.baomidou.mybatisplus.annotation.TableName;
 
 import java.time.LocalDateTime;
 
+/** 内容分类记录，保存展示信息、排序、状态及逻辑删除标记。 */
 @TableName("content_category")
 public class ContentCategory {
     @TableId(type = IdType.ASSIGN_ID)

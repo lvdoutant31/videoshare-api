@@ -1,0 +1,28 @@
+# 企业微信自建应用网页授权；所有待填写项集中于本文件，也可用同名环境变量覆盖。
+# 开启真实授权：enabled=true，mock-enabled=false，填写 corp-id / agent-id / secret / redirect-uri / identity-key。
+yingliu:
+  app:
+    # C 端正式环境仅允许企业微信登录；本地或自动化测试需要手机号夹具时显式开启。
+    phone-login-enabled: ${YINGLIU_PHONE_LOGIN_ENABLED:false}
+    # App 会话默认 7 天，服务端令牌有效期与登录响应使用同一配置。
+    session-timeout-seconds: ${YINGLIU_APP_SESSION_TIMEOUT_SECONDS:604800}
+  wecom:
+    enabled: ${WECOM_ENABLED:false}
+    mock-enabled: ${WECOM_MOCK_ENABLED:${YINGLIU_WECOM_MOCK_ENABLED:false}}
+    # 企业 ID（管理后台“我的企业”）和自建应用 AgentId / Secret。
+    corp-id: ${WECOM_CORP_ID:}
+    agent-id: ${WECOM_AGENT_ID:0}
+    secret: ${WECOM_SECRET:}
+    # 企业微信网页授权回跳至前端登录页，例 https://video.example.com/h5/login。
+    # 不是后端 POST /api/v1/app/auth/wecom/callback；需在企业微信配置网页授权可信域名。
+    redirect-uri: ${WECOM_REDIRECT_URI:}
+    # 至少 32 字符的随机密钥，用于企业成员 ID 加密和 HMAC；上线后保持稳定，不提交真实值。
+    identity-key: ${WECOM_IDENTITY_KEY:}
+    state-ttl-seconds: ${WECOM_STATE_TTL_SECONDS:300}
+    # 同源 HTTPS 部署开启；仅本地 HTTP 调试在 application-local.yml 关闭。
+    cookie-secure: ${WECOM_COOKIE_SECURE:true}
+
+# WxJava 4.6.0 的失败请求日志可能包含 access_token，禁用 SDK 原始请求日志。
+logging:
+  level:
+    me.chanjar.weixin: "OFF"
