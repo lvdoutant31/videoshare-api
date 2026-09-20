@@ -29,6 +29,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @Testcontainers(disabledWithoutDocker = true)
 @SpringBootTest(classes = {YingliuApplication.class, AdminVideoIntegrationTest.ActorConfiguration.class}, properties = {
         "spring.flyway.enabled=true",
+        "yingliu.admin.auth-bypass-admin-id=1001",
         "spring.autoconfigure.exclude=org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration,org.redisson.spring.starter.RedissonAutoConfigurationV2,cn.dev33.satoken.dao.SaTokenDaoRedisJackson"
 })
 @AutoConfigureMockMvc
