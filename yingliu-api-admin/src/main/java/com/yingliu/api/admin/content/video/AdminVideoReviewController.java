@@ -46,9 +46,9 @@ public class AdminVideoReviewController {
             @RequestParam(required = false) Long authorId,
             @RequestParam(required = false) String riskLevel,
             HttpServletRequest request) {
-        authorizer.require("review:view");
+        long actorAdminId = authorizer.require("review:view");
         ServicePage<VideoAdminService.ReviewQueueItem> result = service.listReviewQueue(
-                new VideoAdminService.ReviewQueueQuery(page, pageSize, keyword, authorId, riskLevel));
+                new VideoAdminService.ReviewQueueQuery(page, pageSize, keyword, authorId, riskLevel, actorAdminId));
         return ApiResponse.ok(new PageResponse<>(result.items().stream().map(this::queueItem).toList(), page, pageSize,
                 result.total()), traceId(request));
     }
@@ -63,6 +63,12 @@ public class AdminVideoReviewController {
     @OperLog(module = "REVIEW", action = "CLAIM", targetType = "VIDEO", detail = "认领审核")
     public ApiResponse<VideoDtos.Detail> claim(@PathVariable long videoId, @Valid @RequestBody VideoDtos.Claim body, HttpServletRequest request) {
         return ApiResponse.ok(detail(service.claimReview(videoId, authorizer.require("review:claim"), body.version())), traceId(request));
+    }
+
+    @PostMapping("/{videoId}/release")
+    @OperLog(module = "REVIEW", action = "RELEASE", targetType = "VIDEO", detail = "释放审核")
+    public ApiResponse<VideoDtos.Detail> release(@PathVariable long videoId, @Valid @RequestBody VideoDtos.Claim body, HttpServletRequest request) {
+        return ApiResponse.ok(detail(service.releaseReview(videoId, authorizer.require("review:claim"), body.version())), traceId(request));
     }
 
     @PostMapping("/{videoId}/request-revision")

@@ -14,6 +14,8 @@ public interface VideoAdminService {
     long currentAuthorId(long actorAdminId);
     /** 领取当前版本的审核任务；currentVersion 用于避免对过时版本进行处理。 */
     VideoDetail claimReview(long videoId, long actorAdminId, int currentVersion);
+    /** 释放审核任务，使其可以重新领取。 */
+    VideoDetail releaseReview(long videoId, long actorAdminId, int currentVersion);
     VideoDetail requestRevision(long videoId, long actorAdminId, int currentVersion, String reason);
     VideoDetail submitForReview(long videoId, long actorAdminId);
     ServicePage<ReviewQueueItem> listReviewQueue(ReviewQueueQuery query);
@@ -51,7 +53,8 @@ public interface VideoAdminService {
                               List<Long> tagIds, String visibility) { }
 
     record VideoQuery(long page, long pageSize, String keyword, Long authorId, String auditStatus, String publishStatus) { }
-    record ReviewQueueQuery(long page, long pageSize, String keyword, Long authorId, String riskLevel) { }
+    record ReviewQueueQuery(long page, long pageSize, String keyword, Long authorId, String riskLevel,
+                            long actorAdminId) { }
     record VideoSummary(long id, long authorId, String authorNickname, String title, String auditStatus,
                         String publishStatus, String visibility, LocalDateTime createdAt, LocalDateTime updatedAt) { }
     record ReviewQueueItem(long id, long authorId, String authorNickname, String title, String riskLevel,

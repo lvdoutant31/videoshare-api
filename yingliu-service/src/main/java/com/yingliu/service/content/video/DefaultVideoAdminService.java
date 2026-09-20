@@ -124,6 +124,14 @@ public class DefaultVideoAdminService implements VideoAdminService {
 
     @Override
     @Transactional
+    public VideoDetail releaseReview(long videoId, long actorAdminId, int currentVersion) {
+        requireNormalAdmin(actorAdminId); Video video = requireVideo(videoId);
+        if (videoMapper.releaseReview(videoId, actorAdminId, currentVersion) != 1) throw stateConflict();
+        insertAuditRecord(video, actorAdminId, "RELEASED", null); return get(videoId);
+    }
+
+    @Override
+    @Transactional
     public VideoDetail requestRevision(long videoId, long actorAdminId, int currentVersion, String reason) {
         requireNormalAdmin(actorAdminId); Video video = requireVideo(videoId);
         String normalized = requireText(reason, 1000, "修改原因不能为空");
@@ -187,7 +195,7 @@ public class DefaultVideoAdminService implements VideoAdminService {
     @Override
     public ServicePage<ReviewQueueItem> listReviewQueue(ReviewQueueQuery query) {
         Page<Video> page = videoMapper.selectReviewPage(new Page<>(query.page(), query.pageSize()), query.keyword(),
-                query.authorId(), query.riskLevel());
+                query.authorId(), query.riskLevel(), query.actorAdminId());
         Map<Long, VideoAuthor> authors = authorsById(page.getRecords().stream().map(Video::getAuthorId).toList());
         return new ServicePage<>(page.getRecords().stream().map(video -> {
             VideoAuthor author = authors.get(video.getAuthorId());
@@ -386,7 +394,8 @@ public class DefaultVideoAdminService implements VideoAdminService {
         record.setReviewerAdminId(reviewerAdminId);
         record.setAction(action);
         record.setReason(reason);
-        if (!"SUBMITTED".equals(action)) record.setReviewedAt(java.time.LocalDateTime.now());
+        if ("CLAIMED".equals(action)) record.setClaimedAt(java.time.LocalDateTime.now());
+        else if (!"SUBMITTED".equals(action)) record.setReviewedAt(java.time.LocalDateTime.now());
         auditRecordMapper.insert(record);
     }
 

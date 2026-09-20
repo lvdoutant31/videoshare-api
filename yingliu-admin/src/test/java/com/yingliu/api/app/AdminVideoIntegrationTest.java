@@ -40,6 +40,7 @@ class AdminVideoIntegrationTest {
     private static final long COVER_MEDIA_ID = 1004L;
     private static final long CATEGORY_ID = 1005L;
     private static final long TAG_ID = 1006L;
+    private static final long SECOND_ADMIN_ID = 1007L;
 
     @Container
     static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
@@ -106,6 +107,8 @@ class AdminVideoIntegrationTest {
 
     @Autowired
     private com.yingliu.service.content.video.VideoAdminService videoService;
+    @Autowired
+    private com.yingliu.service.content.video.mapper.VideoMapper videoMapper;
     @Autowired
     private MockMvc mockMvc;
     @Autowired
@@ -175,6 +178,23 @@ class AdminVideoIntegrationTest {
 
         mockMvc.perform(post("/api/v1/admin/reviews/videos/{videoId}/approve", id)
                         .contentType("application/json")
+                        .content("{\"currentVersion\":1,\"reason\":\"未认领直接审批\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("STATE_CONFLICT"));
+
+        mockMvc.perform(post("/api/v1/admin/reviews/videos/{videoId}/claim", id)
+                        .contentType("application/json")
+                        .content("{\"version\":1}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.auditStatus").value("CLAIMED"));
+
+        mockMvc.perform(get("/api/v1/admin/reviews/videos"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(1))
+                .andExpect(jsonPath("$.data.items[0].id").value(id));
+
+        mockMvc.perform(post("/api/v1/admin/reviews/videos/{videoId}/approve", id)
+                        .contentType("application/json")
                         .content("{\"currentVersion\":1,\"reason\":\"审核通过\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.auditStatus").value("APPROVED"))
@@ -183,7 +203,8 @@ class AdminVideoIntegrationTest {
         mockMvc.perform(get("/api/v1/admin/reviews/videos/{videoId}/history", id))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data[0].action").value("APPROVED"))
-                .andExpect(jsonPath("$.data[1].action").value("SUBMITTED"));
+                .andExpect(jsonPath("$.data[1].action").value("CLAIMED"))
+                .andExpect(jsonPath("$.data[2].action").value("SUBMITTED"));
 
         mockMvc.perform(post("/api/v1/admin/reviews/videos/{videoId}/reject", id)
                         .contentType("application/json")
@@ -193,8 +214,53 @@ class AdminVideoIntegrationTest {
     }
 
     @Test
+    void metadataUpdatesDoNotTransferReviewOwnership() throws Exception {
+        String id = createAndSubmit("认领隔离视频");
+        long videoId = Long.parseLong(id);
+        videoService.claimReview(videoId, ADMIN_ID, 1);
+        insertSecondAdmin();
+
+        org.junit.jupiter.api.Assertions.assertEquals(1, videoMapper.updateMetadata(videoId, SECOND_ADMIN_ID, 1,
+                "修改后的标题", null, "PUBLIC", ORIGINAL_MEDIA_ID));
+        org.junit.jupiter.api.Assertions.assertEquals(ADMIN_ID,
+                jdbcTemplate.queryForObject("SELECT review_claimed_by FROM video WHERE id = ?", Long.class, videoId));
+        org.junit.jupiter.api.Assertions.assertThrows(com.yingliu.common.exception.BusinessException.class,
+                () -> videoService.approveReview(videoId, SECOND_ADMIN_ID, 2, null));
+
+        videoService.approveReview(videoId, ADMIN_ID, 2, null);
+        org.junit.jupiter.api.Assertions.assertNull(
+                jdbcTemplate.queryForObject("SELECT review_claimed_by FROM video WHERE id = ?", Long.class, videoId));
+    }
+
+    @Test
+    void anotherReviewerCanReleaseAndReclaimAStuckReview() throws Exception {
+        String id = createAndSubmit("释放认领视频");
+        long videoId = Long.parseLong(id);
+        insertSecondAdmin();
+        videoService.claimReview(videoId, ADMIN_ID, 1);
+
+        videoService.releaseReview(videoId, SECOND_ADMIN_ID, 1);
+        org.junit.jupiter.api.Assertions.assertEquals("PENDING_REVIEW",
+                jdbcTemplate.queryForObject("SELECT audit_status FROM video WHERE id = ?", String.class, videoId));
+        org.junit.jupiter.api.Assertions.assertNull(
+                jdbcTemplate.queryForObject("SELECT review_claimed_by FROM video WHERE id = ?", Long.class, videoId));
+        org.junit.jupiter.api.Assertions.assertEquals(1, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM video_audit_record WHERE video_id = ? AND reviewer_admin_id = ? AND action = 'RELEASED'",
+                Integer.class, videoId, SECOND_ADMIN_ID));
+
+        videoService.claimReview(videoId, SECOND_ADMIN_ID, 1);
+        org.junit.jupiter.api.Assertions.assertEquals(SECOND_ADMIN_ID,
+                jdbcTemplate.queryForObject("SELECT review_claimed_by FROM video WHERE id = ?", Long.class, videoId));
+    }
+
+    @Test
     void rejectsPendingVideoOnlyWithReason() throws Exception {
         String id = createAndSubmit("驳回视频");
+
+        mockMvc.perform(post("/api/v1/admin/reviews/videos/{videoId}/claim", id)
+                        .contentType("application/json")
+                        .content("{\"version\":1}"))
+                .andExpect(status().isOk());
 
         mockMvc.perform(post("/api/v1/admin/reviews/videos/{videoId}/reject", id)
                         .contentType("application/json")
@@ -214,6 +280,10 @@ class AdminVideoIntegrationTest {
 
     private String createAndApprove(String title) throws Exception {
         String id = createAndSubmit(title);
+        mockMvc.perform(post("/api/v1/admin/reviews/videos/{videoId}/claim", id)
+                        .contentType("application/json")
+                        .content("{\"version\":1}"))
+                .andExpect(status().isOk());
         mockMvc.perform(post("/api/v1/admin/reviews/videos/{videoId}/approve", id)
                         .contentType("application/json")
                         .content("{\"currentVersion\":1}"))
@@ -246,6 +316,11 @@ class AdminVideoIntegrationTest {
                 "SELECT COUNT(*) FROM video_audit_record WHERE video_id = ? AND action = 'SUBMITTED'",
                 Integer.class, videoId));
         return id;
+    }
+
+    private void insertSecondAdmin() {
+        jdbcTemplate.update("INSERT INTO sys_admin_user (id, user_id, username, password_hash, status, created_at, updated_at) VALUES (?, NULL, ?, ?, 'NORMAL', NOW(3), NOW(3))",
+                SECOND_ADMIN_ID, "backup-reviewer", "not-used");
     }
 
     @Test

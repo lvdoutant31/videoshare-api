@@ -16,23 +16,26 @@ public interface VideoMapper extends BaseMapper<Video> {
                        @Param("description") String description, @Param("visibility") String visibility,
                        @Param("originalMediaId") long originalMediaId);
 
-    @Update("UPDATE video SET audit_status = 'CLAIMED', updated_by = #{actorAdminId}, updated_at = NOW(3) WHERE id = #{videoId} AND deleted = 0 AND audit_status = 'PENDING_REVIEW' AND current_version = #{currentVersion}")
+    @Update("UPDATE video SET audit_status = 'CLAIMED', review_claimed_by = #{actorAdminId}, review_claimed_at = NOW(3), updated_by = #{actorAdminId}, updated_at = NOW(3) WHERE id = #{videoId} AND deleted = 0 AND audit_status = 'PENDING_REVIEW' AND current_version = #{currentVersion}")
     int claimReview(@Param("videoId") long videoId, @Param("actorAdminId") long actorAdminId, @Param("currentVersion") int currentVersion);
 
-    @Update("UPDATE video SET audit_status = 'REVISION_REQUIRED', updated_by = #{actorAdminId}, updated_at = NOW(3) WHERE id = #{videoId} AND deleted = 0 AND audit_status IN ('PENDING_REVIEW','CLAIMED') AND current_version = #{currentVersion}")
+    @Update("UPDATE video SET audit_status = 'PENDING_REVIEW', review_claimed_by = NULL, review_claimed_at = NULL, updated_by = #{actorAdminId}, updated_at = NOW(3) WHERE id = #{videoId} AND deleted = 0 AND audit_status = 'CLAIMED' AND current_version = #{currentVersion}")
+    int releaseReview(@Param("videoId") long videoId, @Param("actorAdminId") long actorAdminId, @Param("currentVersion") int currentVersion);
+
+    @Update("UPDATE video SET audit_status = 'REVISION_REQUIRED', review_claimed_by = NULL, review_claimed_at = NULL, updated_by = #{actorAdminId}, updated_at = NOW(3) WHERE id = #{videoId} AND deleted = 0 AND audit_status = 'CLAIMED' AND review_claimed_by = #{actorAdminId} AND current_version = #{currentVersion}")
     int requestRevision(@Param("videoId") long videoId, @Param("actorAdminId") long actorAdminId, @Param("currentVersion") int currentVersion);
-    @Update("UPDATE video SET audit_status = 'PENDING_REVIEW', updated_by = #{actorAdminId}, updated_at = NOW(3) "
+    @Update("UPDATE video SET audit_status = 'PENDING_REVIEW', review_claimed_by = NULL, review_claimed_at = NULL, updated_by = #{actorAdminId}, updated_at = NOW(3) "
             + "WHERE id = #{videoId} AND deleted = 0 AND audit_status IN ('DRAFT','REJECTED','REVISION_REQUIRED') AND publish_status = 'UNPUBLISHED'")
     int submitForReview(@Param("videoId") long videoId, @Param("actorAdminId") long actorAdminId);
 
-    @Update("UPDATE video SET audit_status = 'APPROVED', updated_by = #{actorAdminId}, updated_at = NOW(3) "
-            + "WHERE id = #{videoId} AND deleted = 0 AND audit_status = 'PENDING_REVIEW' "
+    @Update("UPDATE video SET audit_status = 'APPROVED', review_claimed_by = NULL, review_claimed_at = NULL, updated_by = #{actorAdminId}, updated_at = NOW(3) "
+            + "WHERE id = #{videoId} AND deleted = 0 AND audit_status = 'CLAIMED' AND review_claimed_by = #{actorAdminId} "
             + "AND publish_status = 'UNPUBLISHED' AND current_version = #{currentVersion}")
     int approveReview(@Param("videoId") long videoId, @Param("actorAdminId") long actorAdminId,
                       @Param("currentVersion") int currentVersion);
 
-    @Update("UPDATE video SET audit_status = 'REJECTED', updated_by = #{actorAdminId}, updated_at = NOW(3) "
-            + "WHERE id = #{videoId} AND deleted = 0 AND audit_status = 'PENDING_REVIEW' "
+    @Update("UPDATE video SET audit_status = 'REJECTED', review_claimed_by = NULL, review_claimed_at = NULL, updated_by = #{actorAdminId}, updated_at = NOW(3) "
+            + "WHERE id = #{videoId} AND deleted = 0 AND audit_status = 'CLAIMED' AND review_claimed_by = #{actorAdminId} "
             + "AND publish_status = 'UNPUBLISHED' AND current_version = #{currentVersion}")
     int rejectReview(@Param("videoId") long videoId, @Param("actorAdminId") long actorAdminId,
                      @Param("currentVersion") int currentVersion);
@@ -115,11 +118,13 @@ public interface VideoMapper extends BaseMapper<Video> {
     java.util.List<Long> selectPublicIdsByAuthor(@Param("authorId") long authorId,
                                                  @Param("cursorId") Long cursorId, @Param("limit") int limit);
 
-    @Select("<script>SELECT * FROM video WHERE deleted = 0 AND audit_status = 'PENDING_REVIEW' "
+    @Select("<script>SELECT * FROM video WHERE deleted = 0 AND (audit_status = 'PENDING_REVIEW' "
+            + "OR (audit_status = 'CLAIMED' AND review_claimed_by = #{actorAdminId})) "
             + "<if test='keyword != null and keyword != \"\"'>AND title LIKE CONCAT('%', #{keyword}, '%') </if>"
             + "<if test='authorId != null'>AND author_id = #{authorId} </if>"
             + "<if test='riskLevel != null and riskLevel != \"\"'>AND risk_level = #{riskLevel} </if>"
             + "ORDER BY FIELD(risk_level, 'HIGH', 'MEDIUM', 'LOW', 'NONE'), updated_at ASC, id ASC</script>")
     Page<Video> selectReviewPage(Page<Video> page, @Param("keyword") String keyword,
-                                  @Param("authorId") Long authorId, @Param("riskLevel") String riskLevel);
+                                  @Param("authorId") Long authorId, @Param("riskLevel") String riskLevel,
+                                  @Param("actorAdminId") long actorAdminId);
 }

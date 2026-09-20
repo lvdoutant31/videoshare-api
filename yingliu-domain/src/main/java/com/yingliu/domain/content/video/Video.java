@@ -25,6 +25,8 @@ public class Video {
     private String visibility;
     private String riskLevel;
     private Integer manualWeight;
+    private Long reviewClaimedBy;
+    private LocalDateTime reviewClaimedAt;
     private LocalDateTime scheduledAt;
     private LocalDateTime publishedAt;
     private LocalDateTime offShelfAt;
@@ -65,6 +67,10 @@ public class Video {
     public void setRiskLevel(String riskLevel) { this.riskLevel = riskLevel; }
     public Integer getManualWeight() { return manualWeight; }
     public void setManualWeight(Integer manualWeight) { this.manualWeight = manualWeight; }
+    public Long getReviewClaimedBy() { return reviewClaimedBy; }
+    public void setReviewClaimedBy(Long reviewClaimedBy) { this.reviewClaimedBy = reviewClaimedBy; }
+    public LocalDateTime getReviewClaimedAt() { return reviewClaimedAt; }
+    public void setReviewClaimedAt(LocalDateTime reviewClaimedAt) { this.reviewClaimedAt = reviewClaimedAt; }
     public LocalDateTime getScheduledAt() { return scheduledAt; }
     public void setScheduledAt(LocalDateTime scheduledAt) { this.scheduledAt = scheduledAt; }
     public LocalDateTime getPublishedAt() { return publishedAt; }
