@@ -39,6 +39,7 @@ class VideoUploadServiceTest {
         VideoAdminService videos = proxy(VideoAdminService.class, (proxy, method, args) -> {
             if (method.getName().equals("createDraft")) {
                 command.set((VideoAdminService.CreateDraftCommand) args[0]);
+                return detail(41L);
             }
             return null;
         });
@@ -57,7 +58,8 @@ class VideoUploadServiceTest {
             @Override public void commit(TransactionStatus status) { committed.set(true); }
             @Override public void rollback(TransactionStatus status) { }
         });
-        VideoUploadService service = new VideoUploadService(mapper, videos, storage, transaction, 1024);
+        VideoUploadService service = new VideoUploadService(mapper, videos, storage,
+                org.mockito.Mockito.mock(VideoTranscodeService.class), transaction, 1024);
 
         service.uploadAndCreate(7L, 8L,
                 new MockMultipartFile("file", "video.mp4", "video/mp4", "video-data".getBytes()),
@@ -94,7 +96,8 @@ class VideoUploadServiceTest {
             @Override public void commit(TransactionStatus status) { throw new AssertionError(); }
             @Override public void rollback(TransactionStatus status) { throw new AssertionError(); }
         });
-        VideoUploadService service = new VideoUploadService(mapper, videos, storage, transaction, 1024);
+        VideoUploadService service = new VideoUploadService(mapper, videos, storage,
+                org.mockito.Mockito.mock(VideoTranscodeService.class), transaction, 1024);
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.uploadAndCreate(7L, 8L,
                 new MockMultipartFile("file", "video.mp4", "video/mp4", "video-data".getBytes()),
                 "标题", "简介", "原创", List.of(1L), List.of(2L), "PUBLIC"))
@@ -126,7 +129,8 @@ class VideoUploadServiceTest {
             }
             return null;
         });
-        VideoAdminService videos = proxy(VideoAdminService.class, (proxy, method, args) -> null);
+        VideoAdminService videos = proxy(VideoAdminService.class, (proxy, method, args) ->
+                method.getName().equals("createDraft") ? detail(41L) : null);
         TransactionTemplate transaction = new TransactionTemplate(new PlatformTransactionManager() {
             @Override public TransactionStatus getTransaction(TransactionDefinition definition) {
                 return new SimpleTransactionStatus();
@@ -136,7 +140,8 @@ class VideoUploadServiceTest {
         });
         var storage = new com.yingliu.media.storage.LocalStorageService(
                 mediaDirectory.toString(), "http://localhost:8088/media");
-        var service = new VideoUploadService(mapper, videos, storage, transaction, 1024);
+        var service = new VideoUploadService(mapper, videos, storage,
+                org.mockito.Mockito.mock(VideoTranscodeService.class), transaction, 1024);
         byte[] bytes = "local-video".getBytes(java.nio.charset.StandardCharsets.UTF_8);
         var file = new MockMultipartFile("file", "video.mp4", "video/mp4", bytes);
 
@@ -155,7 +160,8 @@ class VideoUploadServiceTest {
         // Reusing bytes must also persist the newly configured public URL.
         var movedStorage = new com.yingliu.media.storage.LocalStorageService(
                 mediaDirectory.toString(), "http://192.168.1.20:8088/media");
-        new VideoUploadService(mapper, videos, movedStorage, transaction, 1024)
+        new VideoUploadService(mapper, videos, movedStorage,
+                org.mockito.Mockito.mock(VideoTranscodeService.class), transaction, 1024)
                 .uploadAndCreate(7L, 8L, file, "再次上传", null, null, List.of(1L), List.of(), "PUBLIC");
         assertThat(saved.get().getUrl()).isEqualTo("http://192.168.1.20:8088/media/" + key);
         assertThat(inserts.get()).isEqualTo(1);
@@ -165,5 +171,11 @@ class VideoUploadServiceTest {
     @SuppressWarnings("unchecked")
     private static <T> T proxy(Class<T> type, java.lang.reflect.InvocationHandler handler) {
         return (T) Proxy.newProxyInstance(type.getClassLoader(), new Class<?>[]{type}, handler);
+    }
+
+    private static VideoAdminService.VideoDetail detail(long id) {
+        return new VideoAdminService.VideoDetail(id, 8L, "作者", "标题", null, null, null, null,
+                "DRAFT", "UNPUBLISHED", "PUBLIC", "NONE", 1, List.of(), List.of(),
+                null, null, null, null);
     }
 }

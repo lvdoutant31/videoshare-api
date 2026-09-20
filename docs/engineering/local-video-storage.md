@@ -9,6 +9,10 @@ MEDIA_ROOT=document/media
 MEDIA_LOCAL_URL_PREFIX=http://localhost:8088/media
 MEDIA_HTTP_PORT=8088
 MEDIA_BIND_ADDRESS=127.0.0.1
+VIDEO_TRANSCODE_ENABLED=false
+FFMPEG_PATH=ffmpeg
+VIDEO_TRANSCODE_FIXED_DELAY_MS=5000
+VIDEO_TRANSCODE_TIMEOUT=15m
 ```
 
 也可直接修改 yingliu-admin/src/main/resources/application-local.yml 中的 media.storage-root 和 media.local-url-prefix。环境变量/.env 的对应值会覆盖 YAML 中的默认值。
@@ -44,6 +48,27 @@ http://localhost:8088/media/ab/<sha256>.mp4。
 
 重复上传同一内容时，如果当前本地目录没有文件，会重新落盘并更新已有媒体记录；若本地文件已存在，会更新当前访问 URL 并复用文件。仅切配置不会批量迁移历史视频或自动重写全部数据库 URL。
 
+## 生成 720P 播放文件
+
+服务器安装 FFmpeg 并确认 `ffmpeg -version` 可执行后，将 `VIDEO_TRANSCODE_ENABLED` 改为 `true` 并重启后端。也可以通过 `FFMPEG_PATH` 指定 `ffmpeg.exe` 的绝对路径。
+
+新上传或替换的视频会创建一个 `720P` 转码任务。后台每次领取一条任务，输出 H.264 Main + AAC、yuv420p、最长边不超过 1280、30fps、CRF 24，并使用 `faststart` 将 MP4 索引移动到文件头。播放文件写入：
+
+```text
+MEDIA_ROOT/transcoded/720p/<原文件SHA-256>.mp4
+```
+
+转码成功后，App 的 `videoUrl` 自动指向该文件；任务尚未完成、FFmpeg 不存在、超时或转码失败时，接口继续返回原视频地址。后台的转码重试接口可以把失败任务重新置为待处理。该开关只在 `MEDIA_STORAGE_TYPE=local` 时装配 Worker，OSS 模式不会读取本地路径。
+
+启用前至少确认：
+
+```powershell
+ffmpeg -version
+Get-PSDrive -Name F
+```
+
+生产配置中的 `F:/videoshare/media/.transcode-tmp` 是临时输出目录；任务结束会删除临时文件。应为媒体盘设置容量告警，避免磁盘空间不足导致连续转码失败。
+
 ## 验证
 从上传响应中复制 originalMedia.url：
 
@@ -52,11 +77,11 @@ curl.exe -I "http://localhost:8088/media/ab/实际文件名.mp4"
 curl.exe -s -D - -o NUL -H "Range: bytes=0-31" "http://localhost:8088/media/ab/实际文件名.mp4"
 ```
 
-预期完整请求为 200、Content-Type 为 video/mp4；范围请求为 206 并包含 Content-Range。浏览器或前端播放器可直接使用 URL。自动化单测中的测试字节不是可解码视频；画面/声音验收请上传真实浏览器兼容的 MP4。
+预期完整请求为 200、Content-Type 为 video/mp4，并包含 Cache-Control、Accept-Ranges；范围请求为 206 并包含 Content-Range。浏览器或前端播放器可直接使用 URL。自动化单测中的测试字节不是可解码视频；画面/声音验收请上传真实浏览器兼容的 MP4。
 
 ## 手机或其他电脑调试
 localhost 指向观看设备自己。需要局域网访问时，将 MEDIA_LOCAL_URL_PREFIX 改为开发机的局域网地址（例如 http://192.168.1.20:8088/media），MEDIA_BIND_ADDRESS 改为 0.0.0.0，按需放行防火墙端口并重建媒体容器；重启后端后再上传。
 
-此 Nginx 文件是本地调试的直接访问配置，拥有链接即可读文件。HTTPS 前端须配套 HTTPS 视频地址；生产访问鉴权、OSS 备份和转码不在本次修改范围内。
+此 Nginx 文件是本地调试的直接访问配置，拥有链接即可读文件。HTTPS 前端须配套 HTTPS 视频地址；生产访问鉴权和 OSS 备份不在本次修改范围内。
 
 停止媒体服务：docker compose -f compose.media.yml down。宿主机视频目录不会被删除。

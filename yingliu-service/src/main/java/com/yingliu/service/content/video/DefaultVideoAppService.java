@@ -44,11 +44,13 @@ public class DefaultVideoAppService implements VideoAppService {
     private final ContentTagMapper tagMapper;
     private final MediaStorage mediaStorage;
     private final AppInteractionService interactionService;
+    private final VideoTranscodeService transcodeService;
 
     public DefaultVideoAppService(VideoMapper videoMapper, VideoAuthorMapper authorMapper,
                                   MediaResourceMapper mediaMapper, VideoStatsMapper statsMapper,
                                   VideoTagMapMapper tagMapMapper, ContentTagMapper tagMapper,
-                                  MediaStorage mediaStorage, AppInteractionService interactionService) {
+                                  MediaStorage mediaStorage, AppInteractionService interactionService,
+                                  VideoTranscodeService transcodeService) {
         this.videoMapper = videoMapper;
         this.authorMapper = authorMapper;
         this.mediaMapper = mediaMapper;
@@ -57,6 +59,7 @@ public class DefaultVideoAppService implements VideoAppService {
         this.tagMapper = tagMapper;
         this.mediaStorage = mediaStorage;
         this.interactionService = interactionService;
+        this.transcodeService = transcodeService;
     }
 
     @Override
@@ -80,6 +83,8 @@ public class DefaultVideoAppService implements VideoAppService {
         List<Video> videos = hasNext ? rows.subList(0, limit) : rows;
         Map<Long, VideoAuthor> authors = authors(videos.stream().map(Video::getAuthorId).toList());
         Map<Long, MediaResource> originals = originals(videos);
+        Map<Long, MediaResource> playbacks = transcodeService.readyMediaByVideoIds(
+                videos.stream().map(Video::getId).toList());
         Map<Long, MediaResource> covers = covers(videos);
         Map<Long, VideoStats> stats = stats(videos.stream().map(Video::getId).toList());
         Map<Long, List<Tag>> tags = tags(videos.stream().map(Video::getId).toList());
@@ -91,6 +96,7 @@ public class DefaultVideoAppService implements VideoAppService {
         List<FeedItem> items = videos.stream().map(video -> feedItem(video,
                         video.getAuthorId() != null ? authors.getOrDefault(video.getAuthorId(), null) : null,
                         video.getOriginalMediaId() != null ? originals.getOrDefault(video.getOriginalMediaId(), null) : null,
+                        playbacks.get(video.getId()),
                         video.getCoverMediaId() != null ? covers.getOrDefault(video.getCoverMediaId(), null) : null,
                         stats.getOrDefault(video.getId(), null),
                         tags.getOrDefault(video.getId(), List.of()),
@@ -112,20 +118,22 @@ public class DefaultVideoAppService implements VideoAppService {
             throw notFound();
         }
         MediaResource cover = cover(video.getCoverMediaId());
+        MediaResource playback = transcodeService.readyMediaByVideoIds(List.of(videoId)).get(videoId);
         VideoStats stats = statsMapper.selectById(video.getId());
         boolean liked = viewerId != null && interactionService.likedVideoIds(viewerId, List.of(video.getId())).contains(video.getId());
         boolean favorited = viewerId != null && interactionService.favoritedVideoIds(viewerId, List.of(video.getId())).contains(video.getId());
         boolean following = viewerId != null && interactionService.isFollowing(viewerId, video.getAuthorId());
         return new VideoDetail(video.getId(), author.getId(), author.getNickname(), video.getTitle(), video.getDescription(),
                 original.getDurationMs(),
-                url(original),
+                url(playback != null ? playback : original),
                 cover(cover), tags(List.of(video.getId())).getOrDefault(video.getId(), List.of()), stats(stats),
                 video.getPublishedAt(), new ViewerState(liked, favorited), following);
     }
 
-    private FeedItem feedItem(Video video, VideoAuthor author, MediaResource original, MediaResource cover,
+    private FeedItem feedItem(Video video, VideoAuthor author, MediaResource original, MediaResource playback,
+                              MediaResource cover,
                               VideoStats stats, List<Tag> tags, ViewerState state, boolean authorFollowing) {
-        String videoUrl = url(original);
+        String videoUrl = url(playback != null ? playback : original);
         return new FeedItem(video.getId(), author.getId(), author.getNickname(), video.getTitle(), video.getDescription(),
                 original == null ? null : original.getDurationMs(), videoUrl, cover(cover), tags, stats(stats),
                 video.getPublishedAt(), state, authorFollowing);

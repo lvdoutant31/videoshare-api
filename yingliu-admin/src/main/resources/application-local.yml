@@ -19,6 +19,12 @@ spring:
     baseline-on-migrate: true
     baseline-version: 202608271200
 yingliu:
+  worker:
+    video-transcode:
+      enabled: ${VIDEO_TRANSCODE_ENABLED:false}
+      ffmpeg-path: ${FFMPEG_PATH:ffmpeg}
+      fixed-delay: ${VIDEO_TRANSCODE_FIXED_DELAY_MS:5000}
+      processing-timeout: ${VIDEO_TRANSCODE_TIMEOUT:15m}
   admin:
     # 延续本地调试默认值；生产配置固定关闭。
     auth-disabled: ${YINGLIU_ADMIN_AUTH_DISABLED:true}

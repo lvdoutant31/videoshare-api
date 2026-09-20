@@ -27,15 +27,18 @@ public class VideoUploadService {
     private final MediaResourceMapper mediaMapper;
     private final VideoAdminService videoService;
     private final MediaStorage mediaStorage;
+    private final VideoTranscodeService transcodeService;
     private final TransactionTemplate transactionTemplate;
     private final long maxFileSize;
 
     public VideoUploadService(MediaResourceMapper mediaMapper, VideoAdminService videoService,
-                              MediaStorage mediaStorage, TransactionTemplate transactionTemplate,
+                              MediaStorage mediaStorage, VideoTranscodeService transcodeService,
+                              TransactionTemplate transactionTemplate,
                               @Value("${media.max-video-size-bytes:524288000}") long maxFileSize) {
         this.mediaMapper = mediaMapper;
         this.videoService = videoService;
         this.mediaStorage = mediaStorage;
+        this.transcodeService = transcodeService;
         this.transactionTemplate = transactionTemplate;
         this.maxFileSize = maxFileSize > 0 ? maxFileSize : DEFAULT_MAX_FILE_SIZE;
     }
@@ -112,7 +115,9 @@ public class VideoUploadService {
         return transactionTemplate.execute(status -> {
             if (media.getId() == null) mediaMapper.insert(media);
             else mediaMapper.updateById(media);
-            return save.apply(media);
+            VideoAdminService.VideoDetail detail = save.apply(media);
+            transcodeService.enqueue(detail.id());
+            return detail;
         });
     }
 

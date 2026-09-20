@@ -15,6 +15,12 @@ spring:
   flyway:
     enabled: ${FLYWAY_ENABLED:true}
 yingliu:
+  worker:
+    video-transcode:
+      enabled: ${VIDEO_TRANSCODE_ENABLED:false}
+      ffmpeg-path: ${FFMPEG_PATH:ffmpeg}
+      fixed-delay: ${VIDEO_TRANSCODE_FIXED_DELAY_MS:5000}
+      processing-timeout: ${VIDEO_TRANSCODE_TIMEOUT:15m}
   app:
     phone-login-enabled: false
   wecom:

@@ -11,6 +11,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.StandardCopyOption;
 
 /**
@@ -39,17 +40,28 @@ public class LocalStorageService implements MediaStorage {
 
     @Override
     public String store(String key, InputStream data, long size, String contentType) {
+        Path temporary = null;
         try {
             Path target = root.resolve(key).normalize();
             if (!target.startsWith(root)) {
                 throw new IllegalArgumentException("Invalid storage key: " + key);
             }
             Files.createDirectories(target.getParent());
-            Files.copy(data, target, StandardCopyOption.REPLACE_EXISTING);
+            temporary = Files.createTempFile(target.getParent(), ".upload-", ".tmp");
+            Files.copy(data, temporary, StandardCopyOption.REPLACE_EXISTING);
+            try {
+                Files.move(temporary, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+            } catch (AtomicMoveNotSupportedException exception) {
+                Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING);
+            }
             log.debug("Stored locally: key={}", key);
             return getUrl(key);
         } catch (IOException ex) {
             throw new IllegalStateException("文件保存失败: " + key, ex);
+        } finally {
+            if (temporary != null) {
+                try { Files.deleteIfExists(temporary); } catch (IOException ignored) { }
+            }
         }
     }
 
