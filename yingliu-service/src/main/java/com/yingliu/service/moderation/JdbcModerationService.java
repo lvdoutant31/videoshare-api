@@ -27,9 +27,9 @@ public class JdbcModerationService implements ModerationService {
   Long videoId=db.queryForObject("SELECT video_id FROM video_comment WHERE id=?",Long.class,id);
   if(videoId==null){throw new BusinessException("RESOURCE_NOT_FOUND", HttpStatus.NOT_FOUND,"评论不存在");}
   Boolean videoDeleted=db.queryForObject("SELECT deleted=1 FROM video WHERE id=? FOR UPDATE",Boolean.class,videoId);
-  if(Boolean.TRUE.equals(videoDeleted)){throw new BusinessException("CONFLICT",HttpStatus.CONFLICT,"视频已删除，评论不可恢复");}
+  if(Boolean.TRUE.equals(videoDeleted)){throw new BusinessException("STATE_CONFLICT",HttpStatus.CONFLICT,"视频已删除，评论不可恢复");}
   int updated=db.update("UPDATE video_comment SET status='PENDING',deleted_by=NULL,delete_reason=NULL,deleted_at=NULL,updated_at=NOW(3) WHERE id=? AND status='HIDDEN' AND video_id=?",id,videoId);
-  if(updated==0){throw new BusinessException("CONFLICT",HttpStatus.CONFLICT,"评论状态已变化，不可恢复");}
+  if(updated==0){throw new BusinessException("STATE_CONFLICT",HttpStatus.CONFLICT,"评论状态已变化，不可恢复");}
   return comment(id);
  }
  @Transactional public Comment deleteComment(long id,long actor,String reason){db.update("UPDATE video_comment SET status='DELETED',deleted_by=?,delete_reason=?,deleted_at=NOW(3),updated_at=NOW(3) WHERE id=?",actor,reason,id);return comment(id);}

@@ -76,6 +76,9 @@ class JdbcModerationServiceTest {
         when(db.queryForObject(contains("SELECT deleted=1"), eq(Boolean.class), any(Object[].class))).thenReturn(true);
 
         assertThatThrownBy(() -> new JdbcModerationService(db).restoreComment(1L, 7L))
-                .hasMessage("视频已删除，评论不可恢复");
+                .isInstanceOf(com.yingliu.common.exception.BusinessException.class)
+                .hasMessage("视频已删除，评论不可恢复")
+                .satisfies(error -> assertThat(((com.yingliu.common.exception.BusinessException) error).getCode())
+                        .isEqualTo("STATE_CONFLICT"));
     }
 }
