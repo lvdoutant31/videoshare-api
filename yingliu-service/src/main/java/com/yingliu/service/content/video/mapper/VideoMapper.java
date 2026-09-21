@@ -80,6 +80,11 @@ public interface VideoMapper extends BaseMapper<Video> {
             + "updated_by = #{actorAdminId}, updated_at = NOW(3) WHERE id = #{videoId} AND deleted = 0")
     int deleteVideo(@Param("videoId") long videoId, @Param("actorAdminId") long actorAdminId);
 
+    @Update("UPDATE video_comment SET status = 'DELETED', deleted_at = NOW(3), deleted_by = #{actorAdminId}, "
+            + "delete_reason = #{reason}, updated_at = NOW(3) WHERE video_id = #{videoId} AND status <> 'DELETED'")
+    int deleteCommentsByVideoId(@Param("videoId") long videoId, @Param("actorAdminId") long actorAdminId,
+                                @Param("reason") String reason);
+
     @Select("<script>SELECT v.* FROM video v WHERE v.deleted = 0 AND v.audit_status = 'APPROVED' "
             + "AND v.publish_status = 'PUBLISHED' AND v.visibility = 'PUBLIC' AND v.published_at IS NOT NULL "
             + "AND v.off_shelf_at IS NULL AND EXISTS (SELECT 1 FROM sys_user u WHERE u.id = v.author_id "

@@ -318,6 +318,7 @@ public class DefaultVideoAdminService implements VideoAdminService {
         return batch(videoIds, id -> {
             requireVideo(id);
             if (videoMapper.deleteVideo(id, actorAdminId) != 1) throw stateConflict();
+            videoMapper.deleteCommentsByVideoId(id, actorAdminId, normalizedReason);
             publishScheduleMapper.cancelActiveByVideoId(id);
             return true;
         });
@@ -350,8 +351,9 @@ public class DefaultVideoAdminService implements VideoAdminService {
     public void delete(long videoId, long actorAdminId, String reason) {
         requireNormalAdmin(actorAdminId);
         requireVideo(videoId);
-        requireText(reason, 512, "删除原因不能为空");
+        String normalizedReason = requireText(reason, 512, "删除原因不能为空");
         if (videoMapper.deleteVideo(videoId, actorAdminId) != 1) throw stateConflict();
+        videoMapper.deleteCommentsByVideoId(videoId, actorAdminId, normalizedReason);
         publishScheduleMapper.cancelActiveByVideoId(videoId);
     }
 

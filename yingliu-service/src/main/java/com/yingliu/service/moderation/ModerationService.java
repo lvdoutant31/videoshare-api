@@ -17,7 +17,7 @@ public interface ModerationService {
     void resolveReport(long id, long actor, String resolution, String note);
     void rejectReport(long id, long actor, String note);
 
-    record Comment(long id, long videoId, long userId, String content, String status, String riskLevel,
+    record Comment(long id, long videoId, String videoTitle, long userId, String author, String content, String status, String riskLevel,
                    long likeCount, long replyCount, LocalDateTime createdAt, LocalDateTime updatedAt) {}
     record Report(long id, long reporterId, String targetType, long targetId, String reasonCode, String description,
                   String status, String riskLevel, Long assigneeAdminId, String resolution, String resolutionNote,

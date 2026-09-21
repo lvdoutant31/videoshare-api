@@ -13,11 +13,13 @@ public class JdbcModerationService implements ModerationService {
  public JdbcModerationService(JdbcTemplate db){this.db=db;}
  public ServicePage<Comment> comments(long p,long s,String status,Long videoId,String keyword){
   String where=" WHERE 1=1"; java.util.List<Object> a=new java.util.ArrayList<>();
-  if(status!=null){where+=" AND status=?";a.add(status);} if(videoId!=null){where+=" AND video_id=?";a.add(videoId);} if(keyword!=null&&!keyword.isBlank()){where+=" AND content LIKE ?";a.add("%"+keyword+"%");}
-  long total=db.queryForObject("SELECT COUNT(*) FROM video_comment"+where,Long.class,a.toArray()); a.add((p-1)*s);a.add(s);
-  return new ServicePage<>(db.query("SELECT id,video_id,user_id,content,status,risk_level,like_count,reply_count,created_at,updated_at FROM video_comment"+where+" ORDER BY created_at DESC,id DESC LIMIT ?,?",(r,n)->new Comment(r.getLong(1),r.getLong(2),r.getLong(3),r.getString(4),r.getString(5),r.getString(6),r.getLong(7),r.getLong(8),r.getTimestamp(9).toLocalDateTime(),r.getTimestamp(10).toLocalDateTime()),a.toArray()),total);
+  if(status!=null){where+=" AND c.status=?";a.add(status);} if(videoId!=null){where+=" AND c.video_id=?";a.add(videoId);} if(keyword!=null&&!keyword.isBlank()){where+=" AND c.content LIKE ?";a.add("%"+keyword+"%");}
+  String from=" FROM video_comment c JOIN video v ON v.id=c.video_id JOIN sys_user u ON u.id=c.user_id";
+  long total=db.queryForObject("SELECT COUNT(*)"+from+where,Long.class,a.toArray()); a.add((p-1)*s);a.add(s);
+  return new ServicePage<>(db.query("SELECT c.id,c.video_id,v.title,c.user_id,u.nickname,c.content,c.status,c.risk_level,c.like_count,c.reply_count,c.created_at,c.updated_at"+from+where+" ORDER BY c.created_at DESC,c.id DESC LIMIT ?,?",this::commentRow,a.toArray()),total);
  }
- public Comment comment(long id){return db.queryForObject("SELECT id,video_id,user_id,content,status,risk_level,like_count,reply_count,created_at,updated_at FROM video_comment WHERE id=?",(r,n)->new Comment(r.getLong(1),r.getLong(2),r.getLong(3),r.getString(4),r.getString(5),r.getString(6),r.getLong(7),r.getLong(8),r.getTimestamp(9).toLocalDateTime(),r.getTimestamp(10).toLocalDateTime()),id);}
+ public Comment comment(long id){return db.queryForObject("SELECT c.id,c.video_id,v.title,c.user_id,u.nickname,c.content,c.status,c.risk_level,c.like_count,c.reply_count,c.created_at,c.updated_at FROM video_comment c JOIN video v ON v.id=c.video_id JOIN sys_user u ON u.id=c.user_id WHERE c.id=?",this::commentRow,id);}
+ private Comment commentRow(java.sql.ResultSet r,int n)throws java.sql.SQLException{return new Comment(r.getLong(1),r.getLong(2),r.getString(3),r.getLong(4),r.getString(5),r.getString(6),r.getString(7),r.getString(8),r.getLong(9),r.getLong(10),r.getTimestamp(11).toLocalDateTime(),r.getTimestamp(12).toLocalDateTime());}
  @Transactional public Comment hideComment(long id,long actor,String reason){db.update("UPDATE video_comment SET status='HIDDEN',deleted_by=?,delete_reason=?,deleted_at=NOW(3),updated_at=NOW(3) WHERE id=? AND status<>'DELETED'",actor,reason,id);return comment(id);}
  @Transactional public Comment restoreComment(long id,long actor){db.update("UPDATE video_comment SET status='PENDING',deleted_by=NULL,delete_reason=NULL,deleted_at=NULL,updated_at=NOW(3) WHERE id=?",id);return comment(id);}
  @Transactional public Comment deleteComment(long id,long actor,String reason){db.update("UPDATE video_comment SET status='DELETED',deleted_by=?,delete_reason=?,deleted_at=NOW(3),updated_at=NOW(3) WHERE id=?",actor,reason,id);return comment(id);}
