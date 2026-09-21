@@ -110,7 +110,7 @@ public class DefaultAppCommentService implements AppCommentService {
     @Transactional
     public PublishResult publish(long userId, long videoId, String content, Long replyToCommentId) {
         requireNotMuted(userId);
-        requireVisibleVideo(videoId);
+        requireVisibleVideoForPublish(videoId);
         if (content == null || content.isBlank() || content.length() > MAX_CONTENT_LENGTH) {
             throw new BusinessException("VALIDATION_FAILED", HttpStatus.UNPROCESSABLE_ENTITY, "评论内容需为 1-1000 字符");
         }
@@ -255,6 +255,13 @@ public class DefaultAppCommentService implements AppCommentService {
 
     private void requireVisibleVideo(long videoId) {
         Video video = videoMapper.selectPublicById(videoId);
+        if (video == null) {
+            throw new BusinessException("VIDEO_NOT_FOUND", HttpStatus.NOT_FOUND, "视频不存在或不可访问");
+        }
+    }
+
+    private void requireVisibleVideoForPublish(long videoId) {
+        Video video = videoMapper.selectPublicByIdForUpdate(videoId);
         if (video == null) {
             throw new BusinessException("VIDEO_NOT_FOUND", HttpStatus.NOT_FOUND, "视频不存在或不可访问");
         }

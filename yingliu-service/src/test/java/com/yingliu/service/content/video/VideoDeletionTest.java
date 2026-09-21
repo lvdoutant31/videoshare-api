@@ -7,6 +7,7 @@ import com.yingliu.service.content.video.mapper.VideoMapper;
 import com.yingliu.service.content.video.mapper.VideoPublishScheduleMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.apache.ibatis.annotations.Select;
 
 import java.util.List;
 
@@ -49,5 +50,14 @@ class VideoDeletionTest {
 
         assertThat(result.succeeded()).containsExactly(11L);
         verify(videoMapper).deleteCommentsByVideoId(11L, 7L, "删除视频");
+    }
+
+    @Test
+    void commentPublishLookupLocksTheVideoRowBeforeInsert() throws Exception {
+        String sql = VideoMapper.class.getMethod("selectPublicByIdForUpdate", long.class)
+                .getAnnotation(Select.class).value()[0];
+
+        assertThat(sql).contains("WHERE v.id = #{videoId}");
+        assertThat(sql).endsWith("FOR UPDATE");
     }
 }

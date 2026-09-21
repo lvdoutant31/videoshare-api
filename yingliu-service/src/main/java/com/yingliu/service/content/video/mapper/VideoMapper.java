@@ -114,6 +114,14 @@ public interface VideoMapper extends BaseMapper<Video> {
             + "WHERE m.id = v.original_media_id AND m.resource_type = 'VIDEO_ORIGINAL' AND m.storage_state = 'READY')")
     Video selectPublicById(@Param("videoId") long videoId);
 
+    /** 发布评论时锁定视频行，和管理端删除视频使用相同的锁顺序。 */
+    @Select("SELECT v.* FROM video v WHERE v.id = #{videoId} AND v.deleted = 0 AND v.audit_status = 'APPROVED' "
+            + "AND v.publish_status = 'PUBLISHED' AND v.visibility = 'PUBLIC' AND v.published_at IS NOT NULL "
+            + "AND v.off_shelf_at IS NULL AND EXISTS (SELECT 1 FROM sys_user u WHERE u.id = v.author_id "
+            + "AND u.status = 'NORMAL' AND u.deleted = 0) AND EXISTS (SELECT 1 FROM media_resource m "
+            + "WHERE m.id = v.original_media_id AND m.resource_type = 'VIDEO_ORIGINAL' AND m.storage_state = 'READY') FOR UPDATE")
+    Video selectPublicByIdForUpdate(@Param("videoId") long videoId);
+
     /** 作者公开视频 ID（游标按 id 倒序；作者主页网格） */
     @Select("<script>SELECT v.id FROM video v WHERE v.author_id = #{authorId} AND v.deleted = 0 "
             + "AND v.audit_status = 'APPROVED' AND v.publish_status = 'PUBLISHED' AND v.visibility = 'PUBLIC' "
