@@ -18,7 +18,10 @@ public interface ModerationService {
     void rejectReport(long id, long actor, String note);
 
     record Comment(long id, long videoId, String videoTitle, long userId, String author, String content, String status, String riskLevel,
-                   long likeCount, long replyCount, LocalDateTime createdAt, LocalDateTime updatedAt) {}
+                   long likeCount, long replyCount, LocalDateTime createdAt, LocalDateTime updatedAt, String handledReason,
+                   Long parentCommentId, List<CommentReply> replies, List<ModerationHistory> history) {}
+    record CommentReply(long id, String author, String content, LocalDateTime createdAt) {}
+    record ModerationHistory(String action, String operator, LocalDateTime createdAt, String reason) {}
     record Report(long id, long reporterId, String targetType, long targetId, String reasonCode, String description,
                   String status, String riskLevel, Long assigneeAdminId, String resolution, String resolutionNote,
                   LocalDateTime resolvedAt, LocalDateTime createdAt, LocalDateTime updatedAt) {}
