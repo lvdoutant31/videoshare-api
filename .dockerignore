@@ -1,0 +1,10 @@
+.env
+.env.*
+!.env.example
+.idea
+.git
+**/target
+**/*.iml
+document/media
+logs
+*.log

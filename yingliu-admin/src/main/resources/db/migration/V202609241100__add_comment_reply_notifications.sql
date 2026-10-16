@@ -1,0 +1,20 @@
+CREATE TABLE comment_reply_notification (
+    id BIGINT UNSIGNED NOT NULL,
+    recipient_user_id BIGINT UNSIGNED NOT NULL,
+    actor_user_id BIGINT UNSIGNED NOT NULL,
+    video_id BIGINT UNSIGNED NOT NULL,
+    comment_id BIGINT UNSIGNED NOT NULL,
+    reply_to_comment_id BIGINT UNSIGNED NOT NULL,
+    reply_content VARCHAR(1000) NOT NULL,
+    source_content VARCHAR(1000) NOT NULL,
+    created_at DATETIME(3) NOT NULL,
+    read_at DATETIME(3) NULL,
+    PRIMARY KEY (id),
+    KEY idx_comment_notice_recipient (recipient_user_id, created_at DESC, id DESC),
+    KEY idx_comment_notice_comment (comment_id),
+    CONSTRAINT fk_comment_notice_recipient FOREIGN KEY (recipient_user_id) REFERENCES sys_user(id),
+    CONSTRAINT fk_comment_notice_actor FOREIGN KEY (actor_user_id) REFERENCES sys_user(id),
+    CONSTRAINT fk_comment_notice_video FOREIGN KEY (video_id) REFERENCES video(id),
+    CONSTRAINT fk_comment_notice_comment FOREIGN KEY (comment_id) REFERENCES video_comment(id),
+    CONSTRAINT fk_comment_notice_parent FOREIGN KEY (reply_to_comment_id) REFERENCES video_comment(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

@@ -1,0 +1,31 @@
+**/target/
+*.class
+*.jar
+.env
+.env.docker
+.env.local
+.idea/
+*.iml
+logs/
+*.log
+/document/media/
+.superpowers/
+/output/releases/
+/output/backups/
+
+# Local tools and temporary work
+/.agents/
+/.codex-patches/
+/.obsidian/
+/.patch-work/
+/.codebase-memory/
+/tmp/
+/output/
+
+# Private runtime configuration and release bundles
+/deploy/config/yingliu-env.properties
+/deploy/*.zip
+*.pem
+*.key
+*.p12
+*.pfx

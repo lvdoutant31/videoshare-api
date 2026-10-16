@@ -1,0 +1,53 @@
+name: videoshare
+
+services:
+  app:
+    image: videoshare-api:__VERSION__
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      MYSQL_HOST: ${MYSQL_HOST:?Set MYSQL_HOST in .env}
+      MYSQL_PORT: ${MYSQL_PORT:-3306}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:?Set MYSQL_DATABASE in .env}
+      MYSQL_USER: ${MYSQL_USER:?Set MYSQL_USER in .env}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Set MYSQL_PASSWORD in .env}
+      REDIS_HOST: ${REDIS_HOST:-host.docker.internal}
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      FLYWAY_ENABLED: "true"
+      VIDEO_TRANSCODE_ENABLED: "true"
+      FFMPEG_PATH: /usr/bin/ffmpeg
+      MEDIA_ROOT: /data/media
+      MEDIA_STORAGE_TYPE: local
+      MEDIA_LOCAL_URL_PREFIX: /media
+      YINGLIU_ADMIN_AUTHORIZATION_ENABLED: "true"
+      TZ: Asia/Shanghai
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./media:/data/media
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      start_period: 60s
+      retries: 12
+
+  web:
+    image: nginx:stable-alpine3.20-perl
+    ports:
+      - "${WEB_PORT:-8092}:80"
+    volumes:
+      - ./frontend/admin:/srv/admin:ro
+      - ./frontend/h5:/srv/h5:ro
+      - ./media:/srv/media:ro
+      - ./nginx/app.conf:/etc/nginx/conf.d/default.conf:ro
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/videoshare/h5/"]
+      interval: 10s
+      timeout: 5s
+      retries: 6

@@ -1,0 +1,103 @@
+# 全部运行配置归启动模块；环境差异见 application-{local,prod,test}.yml。
+spring:
+  config:
+    import: classpath:application-wecom.yml
+  application:
+    name: videoshare-api
+  profiles:
+    default: local
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
+  jackson:
+    time-zone: UTC
+  flyway:
+    enabled: ${FLYWAY_ENABLED:false}
+  servlet:
+    multipart:
+      max-file-size: ${MEDIA_MAX_VIDEO_SIZE:500MB}
+      max-request-size: ${MEDIA_MAX_REQUEST_SIZE:500MB}
+
+server:
+  port: ${APP_PORT:8080}
+  shutdown: graceful
+
+# 管理端继续使用 Cookie 会话；App 使用独立的 Authorization Bearer 会话。
+# 以下取值只作用于管理端登录域：App 域由 AppSaTokenConfiguration 构造独立的 SaTokenConfig。
+sa-token:
+  token-name: yingliu-admin-session
+  # 会话绝对有效期 12 小时；到期后请求返回 401 TOKEN_EXPIRED，前端跳转登录页。
+  timeout: ${YINGLIU_ADMIN_SESSION_TIMEOUT:43200}
+  # 空闲 30 分钟自动下线；活跃请求会刷新最近活跃时间，因此连续操作不会被中断。
+  active-timeout: ${YINGLIU_ADMIN_IDLE_TIMEOUT:1800}
+  # 同账号只保留一个有效会话：新登录顶掉旧会话，被顶下的请求提示"账号已在其他设备登录"。
+  is-concurrent: false
+  is-share: false
+  # 仅从 Cookie 读取管理端令牌，关闭请求体与请求头读取，收窄凭证入口。
+  is-read-cookie: true
+  is-read-header: false
+  is-read-body: false
+  cookie:
+    path: /
+    http-only: true
+    same-site: Lax
+    secure: ${YINGLIU_ADMIN_COOKIE_SECURE:false}
+
+yingliu:
+  admin:
+    # true：使用 Cookie 登录并校验权限；false：完全关闭后台鉴权，业务接口无需 Cookie。
+    authorization-enabled: ${YINGLIU_ADMIN_AUTHORIZATION_ENABLED:true}
+  auth:
+    login:
+      # 连续失败达到该次数即锁定账号；计数与锁定标记存放在 Redis，多实例一致。
+      max-failures: ${YINGLIU_ADMIN_LOGIN_MAX_FAILURES:5}
+      lock-seconds: ${YINGLIU_ADMIN_LOGIN_LOCK_SECONDS:900}
+      # 单 IP 每分钟登录上限；0 表示关闭。反向代理未还原真实客户端 IP 时必须保持 0，
+      # 否则所有用户共用同一计数器而被一起限流。
+      ip-limit-per-minute: ${YINGLIU_ADMIN_LOGIN_IP_LIMIT:0}
+  worker:
+    scheduled-publish:
+      enabled: false
+      fixed-delay: 5000
+      batch-size: 50
+      processing-timeout: 5m
+
+# OSS 属性只在 media.storage-type=oss 时校验；local/test 无需云凭据。
+media:
+  max-video-size-bytes: ${MEDIA_MAX_VIDEO_SIZE_BYTES:524288000}
+  oss:
+    endpoint: ${OSS_ENDPOINT:}
+    access-key-id: ${OSS_ACCESS_KEY_ID:}
+    access-key-secret: ${OSS_ACCESS_KEY_SECRET:}
+    bucket-name: ${OSS_BUCKET_NAME:}
+    url-prefix: ${OSS_URL_PREFIX:}
+    callback-url: ${OSS_CALLBACK_URL:}
+    region: ${OSS_REGION:cn-wuhan-lr}
+    sts-endpoint: ${OSS_STS_ENDPOINT:sts.cn-hangzhou.aliyuncs.com}
+    role-arn: ${OSS_STS_ROLE_ARN:}
+    upload-dir: ${OSS_UPLOAD_DIR:dir/}
+    # STS 表单签名有效期，单位：秒；现有签名策略仍限制 50,240,000 字节。
+    signature-expire-seconds: ${OSS_SIGNATURE_EXPIRE_SECONDS:3600}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+logging:
+  charset:
+    console: UTF-8
+    file: UTF-8
+  file:
+    name: ${YINGLIU_LOG_FILE:logs/yingliu-api.log}
+  logback:
+    rollingpolicy:
+      max-file-size: 20MB
+      max-history: 14
+      total-size-cap: 1GB
+  pattern:
+    console: "%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %-5level [%X{traceId:-}] %logger{36} - %msg%n"
+    file: "%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %-5level [%X{traceId:-}] %logger{36} - %msg%n"

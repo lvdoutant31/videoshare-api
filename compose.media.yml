@@ -1,0 +1,15 @@
+name: ticktok-local-media
+services:
+  media:
+    image: nginx:stable-alpine3.20-perl
+    ports:
+      - "${MEDIA_BIND_ADDRESS:-127.0.0.1}:${MEDIA_HTTP_PORT:-8088}:80"
+    volumes:
+      - type: bind
+        source: ${MEDIA_ROOT:-./document/media}
+        target: /srv/media
+        read_only: true
+      - type: bind
+        source: ./docker/nginx/media.conf
+        target: /etc/nginx/conf.d/default.conf
+        read_only: true
