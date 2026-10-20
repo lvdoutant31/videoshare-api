@@ -30,8 +30,7 @@ class AdminAuthInterceptor implements HandlerInterceptor {
     /**
      * OSS 上传签名与中转上传入口。这些路径不在 {@code /api/v1/admin} 之下，且定义在
      * 不依赖本模块、也没有 Sa-Token 依赖的 {@code yingliu-media} 中，无法用注解声明，
-     * 因此在此按路径集中要求上传测试权限——此前它们对任何人开放，可被用来取得
-     * 对象存储上传签名。
+     * 因此在此按路径集中要求媒体上传权限，避免未认证请求获取对象存储上传签名。
      */
     static final String[] OSS_UPLOAD_PATHS = {
             "/get_post_signature_for_oss_upload",
@@ -39,7 +38,7 @@ class AdminAuthInterceptor implements HandlerInterceptor {
             "/api/v1/media/oss/upload",
     };
 
-    private static final String OSS_UPLOAD_PERMISSION = "oss-test:upload";
+    private static final String MEDIA_UPLOAD_PERMISSION = "oss-test:upload";
     private static final Set<String> OSS_UPLOAD_PATH_SET = Set.of(OSS_UPLOAD_PATHS);
 
     private final AdminAuthBypassProperties bypassProperties;
@@ -63,39 +62,39 @@ class AdminAuthInterceptor implements HandlerInterceptor {
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
         String method = request.getMethod();
         String path = request.getRequestURI();
-        log.info("Admin authorization: stage=request decision=evaluate method={} path={} handlerType={}",
+        log.debug("管理端请求鉴权：开始检查 method={} path={} handlerType={}",
                 method, path, handler.getClass().getSimpleName());
         if (isAnonymousAllowed(handler)) {
-            log.info("Admin authorization: stage=request decision=allow reason=anonymous-policy method={} path={}",
+            log.debug("管理端请求鉴权：匿名接口放行 method={} path={}",
                     method, path);
             return true;
         }
         String tokenName = StpUtil.getTokenName();
         boolean cookiePresent = request.getCookies() != null && Arrays.stream(request.getCookies())
                 .anyMatch(cookie -> tokenName.equals(cookie.getName()) && !cookie.getValue().isBlank());
-        log.info("Admin authorization: stage=cookie-read result={} tokenName={} cookieCount={} method={} path={}",
+        log.debug("管理端请求鉴权：会话 Cookie 检查 result={} tokenName={} cookieCount={} method={} path={}",
                 cookiePresent ? "success" : "missing", tokenName,
                 request.getCookies() == null ? 0 : request.getCookies().length, method, path);
         // 未登录时抛出 NotLoginException，由 AuthExceptionAdvice 映射为 401。
         try {
             StpUtil.checkLogin();
             Object loginId = StpUtil.getLoginId();
-            log.info("Admin authorization: stage=cookie-auth decision=allow reason=logged-in method={} path={} loginId={}",
+            log.debug("管理端请求鉴权：会话有效 method={} path={} loginId={}",
                     method, path, loginId);
         } catch (RuntimeException exception) {
-            log.info("Admin authorization: stage=cookie-auth decision=deny reason={} method={} path={}",
+            log.debug("管理端请求鉴权：会话无效 reason={} method={} path={}",
                     exception.getClass().getSimpleName(), method, path);
             throw exception;
         }
         String requiredPermission = requiredPermission(request);
         if (requiredPermission != null) {
-            log.info("Admin authorization: stage=path-permission decision=evaluate permission={} method={} path={}",
+            log.debug("管理端请求鉴权：检查权限 permission={} method={} path={}",
                     requiredPermission, method, path);
             permissionAuthorizer.getObject().require(requiredPermission);
-            log.info("Admin authorization: stage=path-permission decision=allow permission={} method={} path={}",
+            log.debug("管理端请求鉴权：权限校验通过 permission={} method={} path={}",
                     requiredPermission, method, path);
         } else {
-            log.info("Admin authorization: stage=path-permission decision=not-applicable method={} path={}",
+            log.debug("管理端请求鉴权：无需额外权限 method={} path={}",
                     method, path);
         }
         return true;
@@ -109,21 +108,21 @@ class AdminAuthInterceptor implements HandlerInterceptor {
      */
     boolean isAnonymousAllowed(Object handler) {
         if (!authorizationProperties.enabled()) {
-            log.info("Admin authorization: stage=anonymous-policy decision=allow reason=authorization-disabled");
+            log.debug("管理端鉴权已关闭，匿名接口检查放行");
             return true;
         }
         if (bypassProperties.enabled()) {
-            log.info("Admin authorization: stage=anonymous-policy decision=allow reason=local-bypass");
+            log.debug("本地调试旁路已启用，匿名接口检查放行");
             return true;
         }
         // 静态资源与 CORS 预检由非控制器处理器处理，参与鉴权会打断跨域预检。
         if (!(handler instanceof HandlerMethod handlerMethod)) {
-            log.info("Admin authorization: stage=anonymous-policy decision=allow reason=non-controller handlerType={}",
+            log.debug("管理端非 Controller 请求放行 handlerType={}",
                     handler.getClass().getSimpleName());
             return true;
         }
         boolean publicApi = isPublic(handlerMethod);
-        log.info("Admin authorization: stage=anonymous-policy decision={} reason={} handler={}.{}",
+        log.debug("管理端匿名接口策略 decision={} reason={} handler={}.{}",
                 publicApi ? "allow" : "continue",
                 publicApi ? "public-api" : "protected-controller",
                 handlerMethod.getBeanType().getSimpleName(), handlerMethod.getMethod().getName());
@@ -137,6 +136,6 @@ class AdminAuthInterceptor implements HandlerInterceptor {
 
     /** 路径级权限：无法用注解声明的外部模块入口在此集中约束。 */
     String requiredPermission(HttpServletRequest request) {
-        return OSS_UPLOAD_PATH_SET.contains(request.getRequestURI()) ? OSS_UPLOAD_PERMISSION : null;
+        return OSS_UPLOAD_PATH_SET.contains(request.getRequestURI()) ? MEDIA_UPLOAD_PERMISSION : null;
     }
 }

@@ -3,7 +3,7 @@ spring:
   config:
     import: classpath:application-wecom.yml
   application:
-    name: yingliu-api
+    name: videoshare-api
   profiles:
     default: local
   lifecycle:
@@ -88,5 +88,16 @@ management:
       probes:
         enabled: true
 logging:
+  charset:
+    console: UTF-8
+    file: UTF-8
+  file:
+    name: ${YINGLIU_LOG_FILE:logs/yingliu-api.log}
+  logback:
+    rollingpolicy:
+      max-file-size: 20MB
+      max-history: 14
+      total-size-cap: 1GB
   pattern:
     console: "%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %-5level [%X{traceId:-}] %logger{36} - %msg%n"
+    file: "%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %-5level [%X{traceId:-}] %logger{36} - %msg%n"

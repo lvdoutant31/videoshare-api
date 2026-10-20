@@ -11,6 +11,8 @@ public interface VideoAdminService {
     VideoDetail get(long videoId);
     VideoDetail update(long videoId, long actorAdminId, UpdateCommand command);
     VideoDetail createDraft(CreateDraftCommand command);
+    VideoDetail createUserSubmission(long userId, Long mediaId, String title, String description,
+                                     List<Long> categories, List<Long> tags);
     long currentAuthorId(long actorAdminId);
     /** 领取当前版本的审核任务；currentVersion 用于避免对过时版本进行处理。 */
     VideoDetail claimReview(long videoId, long actorAdminId, int currentVersion);
@@ -48,7 +50,7 @@ public interface VideoAdminService {
         }
     }
 
-    record CreateDraftCommand(long actorAdminId, long authorId, long originalMediaId, Long coverMediaId,
+    record CreateDraftCommand(long actorAdminId, long authorId, Long originalMediaId, Long coverMediaId,
                               String title, String description, String sourceNote, List<Long> categoryIds,
                               List<Long> tagIds, String visibility) { }
 
@@ -56,14 +58,25 @@ public interface VideoAdminService {
     record ReviewQueueQuery(long page, long pageSize, String keyword, Long authorId, String riskLevel,
                             long actorAdminId) { }
     record VideoSummary(long id, long authorId, String authorNickname, String title, String auditStatus,
-                        String publishStatus, String visibility, LocalDateTime createdAt, LocalDateTime updatedAt) { }
+                        String publishStatus, String visibility, long watchTimeMs,
+                        LocalDateTime createdAt, LocalDateTime updatedAt) { }
     record ReviewQueueItem(long id, long authorId, String authorNickname, String title, String riskLevel,
                            int currentVersion, LocalDateTime submittedAt) { }
     record VideoDetail(long id, long authorId, String authorNickname, String title, String description,
                        String sourceNote, MediaView originalMedia, MediaView coverMedia, String auditStatus,
                        String publishStatus, String visibility, String riskLevel, int currentVersion,
                        List<CategoryView> categories, List<TagView> tags, LocalDateTime scheduledAt,
-                       LocalDateTime publishedAt, LocalDateTime createdAt, LocalDateTime updatedAt) { }
+                       LocalDateTime publishedAt, long watchTimeMs, LocalDateTime createdAt, LocalDateTime updatedAt) {
+        public VideoDetail(long id, long authorId, String authorNickname, String title, String description,
+                           String sourceNote, MediaView originalMedia, MediaView coverMedia, String auditStatus,
+                           String publishStatus, String visibility, String riskLevel, int currentVersion,
+                           List<CategoryView> categories, List<TagView> tags, LocalDateTime scheduledAt,
+                           LocalDateTime publishedAt, LocalDateTime createdAt, LocalDateTime updatedAt) {
+            this(id, authorId, authorNickname, title, description, sourceNote, originalMedia, coverMedia,
+                    auditStatus, publishStatus, visibility, riskLevel, currentVersion, categories, tags,
+                    scheduledAt, publishedAt, 0L, createdAt, updatedAt);
+        }
+    }
     record AuditHistoryItem(long id, int videoVersion, Long reviewerAdminId, String action, String reason,
                             LocalDateTime claimedAt, LocalDateTime reviewedAt, LocalDateTime createdAt) { }
     record MediaView(long id, String resourceType, String contentType, long fileSize, Integer width,

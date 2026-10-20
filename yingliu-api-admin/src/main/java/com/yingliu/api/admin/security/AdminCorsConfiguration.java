@@ -22,7 +22,8 @@ public class AdminCorsConfiguration implements WebMvcConfigurer {
                 // 管理端大量使用 PATCH/PUT/DELETE（编辑、下架、删除等）。此前只放行 GET/POST/OPTIONS，
                 // 跨域部署时这些请求会在预检阶段被拒绝，表现为"编辑和删除全部失败"。
                 .allowedMethods("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")
-                .allowedHeaders("Content-Type", "X-Trace-Id", "Idempotency-Key")
+                .allowedHeaders("Content-Type", "X-Trace-Id", "Idempotency-Key",
+                        "X-Yingliu-Encrypted", "X-Yingliu-Envelope")
                 .exposedHeaders("X-Trace-Id")
                 // Cookie 会话必须携带凭证；因此来源不能使用通配符。
                 .allowCredentials(true)

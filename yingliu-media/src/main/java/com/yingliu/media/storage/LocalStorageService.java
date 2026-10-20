@@ -35,7 +35,7 @@ public class LocalStorageService implements MediaStorage {
                                @Value("${media.local-url-prefix:/media}") String urlPrefix) {
         this.root = Path.of(root).toAbsolutePath().normalize();
         this.urlPrefix = urlPrefix.replaceFirst("/+$", "");
-        log.info("Local storage initialized: root={}, urlPrefix={}", this.root, this.urlPrefix);
+        log.info("本地媒体存储已就绪 root={}，访问前缀={}", this.root, this.urlPrefix);
     }
 
     @Override
@@ -54,7 +54,7 @@ public class LocalStorageService implements MediaStorage {
             } catch (AtomicMoveNotSupportedException exception) {
                 Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING);
             }
-            log.debug("Stored locally: key={}", key);
+            log.debug("媒体文件已保存 key={}", key);
             return getUrl(key);
         } catch (IOException ex) {
             throw new IllegalStateException("文件保存失败: " + key, ex);

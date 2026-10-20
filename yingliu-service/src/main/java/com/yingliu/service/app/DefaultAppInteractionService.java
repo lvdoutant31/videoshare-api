@@ -3,7 +3,6 @@ package com.yingliu.service.app;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.yingliu.common.exception.BusinessException;
 import com.yingliu.domain.content.video.Video;
-import com.yingliu.domain.content.video.VideoStats;
 import com.yingliu.domain.interaction.UserFollow;
 import com.yingliu.domain.interaction.UserVideoFavorite;
 import com.yingliu.domain.interaction.UserVideoLike;
@@ -62,16 +61,14 @@ public class DefaultAppInteractionService implements AppInteractionService {
     @Override
     @Transactional
     public TargetState setVideoLike(long userId, long videoId, boolean active) {
-        requirePublicVideo(videoId);
-        boolean existed = likeMapper.selectCount(new LambdaQueryWrapper<UserVideoLike>()
-                .eq(UserVideoLike::getUserId, userId).eq(UserVideoLike::getVideoId, videoId)) > 0;
-        if (active && !existed) {
-            insertLike(userId, videoId);
-            statsMapper.adjustLike(videoId, 1);
-        } else if (!active && existed) {
-            likeMapper.delete(new LambdaQueryWrapper<UserVideoLike>()
-                    .eq(UserVideoLike::getUserId, userId).eq(UserVideoLike::getVideoId, videoId));
-            statsMapper.adjustLike(videoId, -1);
+        Video video = requirePublicVideo(videoId);
+        int changed = active
+                ? likeMapper.insertIfAbsent(userId, videoId)
+                : likeMapper.deleteByUserAndVideo(userId, videoId);
+        if (changed == 1) {
+            int delta = active ? 1 : -1;
+            statsMapper.adjustLike(videoId, delta);
+            userMapper.adjustLikeReceivedCount(video.getAuthorId(), delta);
         }
         return new TargetState(active, currentLikeCount(videoId));
     }
@@ -80,15 +77,11 @@ public class DefaultAppInteractionService implements AppInteractionService {
     @Transactional
     public TargetState setVideoFavorite(long userId, long videoId, boolean active) {
         requirePublicVideo(videoId);
-        boolean existed = favoriteMapper.selectCount(new LambdaQueryWrapper<UserVideoFavorite>()
-                .eq(UserVideoFavorite::getUserId, userId).eq(UserVideoFavorite::getVideoId, videoId)) > 0;
-        if (active && !existed) {
-            insertFavorite(userId, videoId);
-            statsMapper.adjustFavorite(videoId, 1);
-        } else if (!active && existed) {
-            favoriteMapper.delete(new LambdaQueryWrapper<UserVideoFavorite>()
-                    .eq(UserVideoFavorite::getUserId, userId).eq(UserVideoFavorite::getVideoId, videoId));
-            statsMapper.adjustFavorite(videoId, -1);
+        int changed = active
+                ? favoriteMapper.insertIfAbsent(userId, videoId)
+                : favoriteMapper.deleteByUserAndVideo(userId, videoId);
+        if (changed == 1) {
+            statsMapper.adjustFavorite(videoId, active ? 1 : -1);
         }
         return new TargetState(active, currentFavoriteCount(videoId));
     }
@@ -121,24 +114,14 @@ public class DefaultAppInteractionService implements AppInteractionService {
     public CursorPage<String> listFavoriteVideoIds(long userId, String cursor, int limit) {
         int pageSize = Math.min(Math.max(limit, 1), MAX_LIST_LIMIT);
         Long cursorId = parseCursor(cursor);
-        List<UserVideoFavorite> rows = favoriteMapper.selectList(new LambdaQueryWrapper<UserVideoFavorite>()
-                .eq(UserVideoFavorite::getUserId, userId)
-                .lt(cursorId != null, UserVideoFavorite::getVideoId, cursorId)
-                .orderByDesc(UserVideoFavorite::getVideoId)
-                .last("LIMIT " + (pageSize + 1)));
-        return toVideoIdPage(rows.stream().map(UserVideoFavorite::getVideoId).toList(), pageSize);
+        return toVideoIdPage(favoriteMapper.selectPublicIds(userId, cursorId, pageSize + 1), pageSize);
     }
 
     @Override
     public CursorPage<String> listLikeVideoIds(long userId, String cursor, int limit) {
         int pageSize = Math.min(Math.max(limit, 1), MAX_LIST_LIMIT);
         Long cursorId = parseCursor(cursor);
-        List<UserVideoLike> rows = likeMapper.selectList(new LambdaQueryWrapper<UserVideoLike>()
-                .eq(UserVideoLike::getUserId, userId)
-                .lt(cursorId != null, UserVideoLike::getVideoId, cursorId)
-                .orderByDesc(UserVideoLike::getVideoId)
-                .last("LIMIT " + (pageSize + 1)));
-        return toVideoIdPage(rows.stream().map(UserVideoLike::getVideoId).toList(), pageSize);
+        return toVideoIdPage(likeMapper.selectPublicIds(userId, cursorId, pageSize + 1), pageSize);
     }
 
     @Override
@@ -160,13 +143,37 @@ public class DefaultAppInteractionService implements AppInteractionService {
     }
 
     @Override
-    public AuthorProfileView getAuthorProfile(long userId) {
+    public AuthorProfileView getAuthorProfile(long userId, Long viewerId) {
         var user = userMapper.selectById(userId);
-        if (user == null || Objects.equals(user.getDeleted(), 1)) {
+        if (user == null || Objects.equals(user.getDeleted(), 1) || !"NORMAL".equals(user.getStatus())) {
             throw new BusinessException("RESOURCE_NOT_FOUND", HttpStatus.NOT_FOUND, "用户不存在");
         }
         return new AuthorProfileView(String.valueOf(user.getId()), user.getNickname(), avatarUrl(user.getAvatarMediaId()), user.getBio(),
-                nullSafe(user.getFollowingCount()), nullSafe(user.getFollowerCount()), nullSafe(user.getLikeReceivedCount()));
+                nullSafe(user.getFollowingCount()), nullSafe(user.getFollowerCount()), nullSafe(user.getLikeReceivedCount()),
+                viewerId != null && isFollowing(viewerId, userId), videoMapper.countPublicByAuthor(userId));
+    }
+
+    @Override
+    public CursorPage<AuthorSearchView> searchAuthors(String keyword, String cursor, int limit, Long viewerId) {
+        String query = keyword == null ? "" : keyword.trim();
+        if (query.isEmpty()) return new CursorPage<>(List.of(), null);
+        if (query.length() > 60) throw new BusinessException("VALIDATION_FAILED", HttpStatus.UNPROCESSABLE_ENTITY, "搜索关键词不能超过 60 字");
+        int pageSize = Math.min(Math.max(limit, 1), MAX_LIST_LIMIT);
+        var rows = userMapper.searchAuthors(query, parseCursor(cursor), pageSize + 1);
+        boolean hasNext = rows.size() > pageSize;
+        var page = hasNext ? rows.subList(0, pageSize) : rows;
+        if (page.isEmpty()) return new CursorPage<>(List.of(), null);
+        var ids = page.stream().map(com.yingliu.domain.user.AppUser::getId).toList();
+        var counts = videoMapper.countPublicByAuthors(ids).stream().collect(Collectors.toMap(VideoMapper.AuthorContentCount::authorId, VideoMapper.AuthorContentCount::total));
+        var avatarIds = page.stream().map(com.yingliu.domain.user.AppUser::getAvatarMediaId).filter(Objects::nonNull).distinct().toList();
+        java.util.Map<Long, String> avatars = new java.util.HashMap<>();
+        if (!avatarIds.isEmpty()) mediaMapper.selectBatchIds(avatarIds).forEach(media -> {
+            if (media.getRelativePath() != null) avatars.put(media.getId(), mediaStorage.getUrl(media.getRelativePath()));
+        });
+        Set<Long> followed = viewerId == null ? Set.of() : followingIds(viewerId, ids);
+        var items = page.stream().map(user -> new AuthorSearchView(String.valueOf(user.getId()), user.getNickname(),
+                avatars.get(user.getAvatarMediaId()), counts.getOrDefault(user.getId(), 0L), followed.contains(user.getId()))).toList();
+        return new CursorPage<>(items, hasNext ? String.valueOf(page.get(page.size() - 1).getId()) : null);
     }
 
     @Override
@@ -233,30 +240,6 @@ public class DefaultAppInteractionService implements AppInteractionService {
                 .stream().map(UserVideoFavorite::getVideoId).collect(Collectors.toSet());
     }
 
-    private void insertLike(long userId, long videoId) {
-        UserVideoLike like = new UserVideoLike();
-        like.setUserId(userId);
-        like.setVideoId(videoId);
-        like.setCreatedAt(LocalDateTime.now());
-        try {
-            likeMapper.insert(like);
-        } catch (DuplicateKeyException ignored) {
-            // 唯一约束兜底：并发重复点赞视为已存在
-        }
-    }
-
-    private void insertFavorite(long userId, long videoId) {
-        UserVideoFavorite favorite = new UserVideoFavorite();
-        favorite.setUserId(userId);
-        favorite.setVideoId(videoId);
-        favorite.setCreatedAt(LocalDateTime.now());
-        try {
-            favoriteMapper.insert(favorite);
-        } catch (DuplicateKeyException ignored) {
-            // 唯一约束兜底
-        }
-    }
-
     private void insertFollow(long userId, long followeeId) {
         UserFollow follow = new UserFollow();
         follow.setFollowerId(userId);
@@ -269,21 +252,29 @@ public class DefaultAppInteractionService implements AppInteractionService {
         }
     }
 
-    private void requirePublicVideo(long videoId) {
+    private Video requirePublicVideo(long videoId) {
         Video video = videoMapper.selectPublicById(videoId);
         if (video == null) {
             throw new BusinessException("VIDEO_NOT_FOUND", HttpStatus.NOT_FOUND, "视频不存在或不可访问");
         }
-    }
-
-    private long currentLikeCount(long videoId) {
-        VideoStats stats = statsMapper.selectById(videoId);
-        return stats == null || stats.getLikeCount() == null ? 0 : stats.getLikeCount();
+        return video;
     }
 
     private long currentFavoriteCount(long videoId) {
-        VideoStats stats = statsMapper.selectById(videoId);
-        return stats == null || stats.getFavoriteCount() == null ? 0 : stats.getFavoriteCount();
+        Long count = statsMapper.selectFavoriteCountForUpdate(videoId);
+        return count == null ? 0 : count;
+    }
+
+    private long currentLikeCount(long videoId) {
+        Long count = statsMapper.selectLikeCountForUpdate(videoId);
+        if (count == null || count == 0) {
+            long authoritativeCount = likeMapper.countByVideo(videoId);
+            if (authoritativeCount > 0) {
+                statsMapper.setLikeCount(videoId, authoritativeCount);
+                return authoritativeCount;
+            }
+        }
+        return count == null ? 0 : count;
     }
 
     private long currentFollowerCount(long userId) {

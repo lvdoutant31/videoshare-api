@@ -49,16 +49,16 @@ public class AdminPermissionAuthorizer {
      * @throws BusinessException 账号不存在或不可用时按对应状态码拒绝；缺少权限时返回 403。
      */
     public long require(String permission) {
-        log.info("Admin authorization: stage=permission decision=evaluate permission={}", permission);
+        log.debug("检查管理员权限 permission={}", permission);
         if (!authorizationProperties.enabled()) {
             long adminId = bypassProperties.adminId();
-            log.info("Admin authorization: stage=permission decision=allow reason=authorization-disabled adminId={} permission={}",
+            log.debug("管理员权限校验已关闭 adminId={} permission={}",
                     adminId, permission);
             return adminId;
         }
         if (bypassProperties.enabled()) {
             long adminId = bypassProperties.adminId();
-            log.info("Admin authorization: stage=permission decision=allow reason=local-bypass adminId={} permission={}",
+            log.debug("本地调试旁路已放行 adminId={} permission={}",
                     adminId, permission);
             return adminId;
         }
@@ -66,12 +66,10 @@ public class AdminPermissionAuthorizer {
         requireActive(adminId);
         AdminPermissionCache.Grants grants = permissionCache.grants(adminId);
         if (!grants.permissions().contains(permission)) {
-            log.info("Admin authorization: stage=permission decision=deny reason=permission-missing adminId={} permission={} roles={} permissions={}",
-                    adminId, permission, grants.roleCodes(), grants.permissions());
+            log.warn("管理员权限不足 adminId={} permission={}", adminId, permission);
             throw new BusinessException("PERMISSION_DENIED", HttpStatus.FORBIDDEN, "无权执行此操作");
         }
-        log.info("Admin authorization: stage=permission decision=allow reason=permission-granted adminId={} permission={} roles={}",
-                adminId, permission, grants.roleCodes());
+        log.debug("管理员权限校验通过 adminId={} permission={}", adminId, permission);
         return adminId;
     }
 
@@ -79,14 +77,14 @@ public class AdminPermissionAuthorizer {
         String status = jdbcTemplate.query("SELECT status FROM sys_admin_user WHERE id = ?",
                 rs -> rs.next() ? rs.getString(1) : null, adminId);
         if (status == null) {
-            log.info("Admin authorization: stage=account-status decision=deny reason=admin-not-found adminId={}", adminId);
+            log.warn("管理员账号不存在 adminId={}", adminId);
             throw new BusinessException("ADMIN_NOT_FOUND", HttpStatus.NOT_FOUND, "后台账号不存在");
         }
         if (!"NORMAL".equals(status)) {
-            log.info("Admin authorization: stage=account-status decision=deny reason=admin-not-eligible adminId={} status={}",
+            log.warn("管理员账号状态异常 adminId={} status={}",
                     adminId, status);
             throw new BusinessException("ADMIN_NOT_ELIGIBLE", HttpStatus.UNPROCESSABLE_ENTITY, "后台账号不可用");
         }
-        log.info("Admin authorization: stage=account-status decision=allow adminId={} status={}", adminId, status);
+        log.debug("管理员账号状态正常 adminId={}", adminId);
     }
 }

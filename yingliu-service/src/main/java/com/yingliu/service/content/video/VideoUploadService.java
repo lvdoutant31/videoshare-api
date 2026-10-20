@@ -20,6 +20,7 @@ import java.util.Locale;
 /** 视频上传用例：按内容摘要复用媒体，在数据库事务中创建媒体记录与视频草稿。 */
 @Service
 public class VideoUploadService {
+    private static final Object[] UPLOAD_LOCKS = createUploadLocks();
     private static final long DEFAULT_MAX_FILE_SIZE = 500L * 1024 * 1024;
     private static final List<String> VIDEO_CONTENT_TYPES = List.of("video/mp4", "video/webm", "video/quicktime");
     private static final List<String> VIDEO_EXTENSIONS = List.of(".mp4", ".webm", ".mov");
@@ -63,6 +64,13 @@ public class VideoUploadService {
                         title, description, visibility, categories, tags, media.getId())));
     }
 
+    public VideoAdminService.VideoDetail uploadUserSubmission(long userId, MultipartFile file, String title,
+            String description, List<Long> categories, List<Long> tags) {
+        if (file == null) return videoService.createUserSubmission(userId, null, title, description, categories, tags);
+        return storeAndSave(file, title, categories, tags, media ->
+                videoService.createUserSubmission(userId, media.getId(), title, description, categories, tags));
+    }
+
     private VideoAdminService.VideoDetail storeAndSave(MultipartFile file, String title,
             List<Long> categories, List<Long> tags,
             java.util.function.Function<MediaResource, VideoAdminService.VideoDetail> save) {
@@ -71,6 +79,15 @@ public class VideoUploadService {
         String suffix = extension(original);
         String sha = sha256(file);
         String key = sha.substring(0, 2) + "/" + sha + suffix;
+        Object lock = UPLOAD_LOCKS[(key.hashCode() & Integer.MAX_VALUE) % UPLOAD_LOCKS.length];
+        // shortcut: uploads are serialized within this single app process; use a Redis lock before adding app replicas.
+        synchronized (lock) {
+            return storeAndSaveLocked(file, key, sha, save);
+        }
+    }
+
+    private VideoAdminService.VideoDetail storeAndSaveLocked(MultipartFile file, String key, String sha,
+            java.util.function.Function<MediaResource, VideoAdminService.VideoDetail> save) {
         MediaResource existing = mediaMapper.selectOne(new LambdaQueryWrapper<MediaResource>()
                 .eq(MediaResource::getRelativePath, key).last("LIMIT 1"));
         boolean created = !mediaStorage.exists(key);
@@ -107,6 +124,12 @@ public class VideoUploadService {
             }
             throw new IllegalStateException("视频保存失败", ex);
         }
+    }
+
+    private static Object[] createUploadLocks() {
+        Object[] locks = new Object[64];
+        java.util.Arrays.setAll(locks, ignored -> new Object());
+        return locks;
     }
 
     private VideoAdminService.VideoDetail saveVideo(MediaResource media,

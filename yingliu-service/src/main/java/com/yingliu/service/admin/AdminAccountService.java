@@ -12,7 +12,6 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDateTime;
 import java.util.List;
 
 @Service
@@ -50,6 +49,72 @@ public class AdminAccountService {
         return adminMapper.selectAllActiveRoles();
     }
 
+    public List<PermissionView> permissionCatalog() {
+        return jdbcTemplate.query("SELECT permission_code, permission_name FROM sys_permission "
+                        + "WHERE permission_code LIKE '%:view' AND permission_code NOT IN ('storage:view', 'report:view') "
+                        + "ORDER BY sort, permission_code",
+                (rs, rowNum) -> new PermissionView(rs.getString(1), rs.getString(2)));
+    }
+
+    public List<String> getPermissionCodes(long adminId) {
+        requireAdmin(adminId);
+        List<String> granted = jdbcTemplate.query("SELECT p.permission_code FROM sys_admin_user_permission aup "
+                        + "JOIN sys_permission p ON p.id = aup.permission_id "
+                        + "WHERE aup.admin_user_id = ? ORDER BY p.sort, p.permission_code",
+                (rs, rowNum) -> rs.getString(1), adminId);
+        java.util.Set<String> menuPrefixes = new java.util.HashSet<>();
+        for (String code : granted) {
+            int separator = code.indexOf(':');
+            if (separator < 0) continue;
+            String menu = code.substring(0, separator);
+            if ("storage".equals(menu)) menu = "dashboard";
+            if ("report".equals(menu)) menu = "comment";
+            menuPrefixes.add(menu);
+        }
+        return permissionCatalog().stream().map(PermissionView::code).filter(code -> {
+            String menu = code.substring(0, code.indexOf(':'));
+            return menuPrefixes.contains(menu);
+        }).toList();
+    }
+
+    @Transactional
+    public void updatePermissions(long adminId, List<String> permissionCodes) {
+        requireAdmin(adminId);
+        if (isSuperAdmin(adminId)) {
+            throw new BusinessException("STATE_CONFLICT", HttpStatus.CONFLICT, "不能修改超级管理员的授权");
+        }
+        List<String> supported = permissionCatalog().stream().map(PermissionView::code).toList();
+        List<String> requested = permissionCodes == null ? List.of() : permissionCodes.stream().distinct().toList();
+        if (!supported.containsAll(requested)) {
+            throw new BusinessException("VALIDATION_FAILED", HttpStatus.UNPROCESSABLE_ENTITY, "权限列表包含无效权限");
+        }
+        java.util.Set<String> expanded = new java.util.LinkedHashSet<>(requested);
+        for (String menuCode : requested) {
+            String prefix = menuCode.substring(0, menuCode.indexOf(':'));
+            if ("dashboard".equals(prefix)) expanded.add("storage:view");
+            if ("comment".equals(prefix)) expanded.add("report:view");
+            String actionPrefix = "comment".equals(prefix) ? "(comment|report)" : prefix;
+            expanded.addAll(jdbcTemplate.query("SELECT permission_code FROM sys_permission WHERE permission_code REGEXP ? "
+                            + "AND permission_code <> 'admin:permissions'",
+                    (rs, rowNum) -> rs.getString(1), "^" + actionPrefix + ":"));
+        }
+        expanded.remove("admin:permissions");
+        jdbcTemplate.update("DELETE FROM sys_admin_user_permission WHERE admin_user_id = ?", adminId);
+        for (String code : expanded) {
+            jdbcTemplate.update("INSERT INTO sys_admin_user_permission (admin_user_id, permission_id, created_at) "
+                            + "SELECT ?, id, NOW(3) FROM sys_permission WHERE permission_code = ?",
+                    adminId, code);
+        }
+    }
+
+    private boolean isSuperAdmin(long adminId) {
+        Integer count = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM sys_admin_user_role aur "
+                        + "JOIN sys_role r ON r.id = aur.role_id WHERE aur.admin_user_id = ? "
+                        + "AND r.role_code = 'SUPER_ADMIN' AND r.status = 'NORMAL'",
+                Integer.class, adminId);
+        return count != null && count > 0;
+    }
+
     @Transactional
     public AdminUser create(String username, String password) {
         validateUsername(username);
@@ -59,13 +124,6 @@ public class AdminAccountService {
         admin.setPasswordHash(BCrypt.hashpw(password, BCrypt.gensalt()));
         admin.setStatus("NORMAL");
         adminMapper.insert(admin);
-        return admin;
-    }
-
-    @Transactional
-    public AdminUser updateRoles(long adminId, List<String> roleCodes) {
-        AdminUser admin = requireAdmin(adminId);
-        syncRoles(adminId, roleCodes);
         return admin;
     }
 
@@ -84,6 +142,16 @@ public class AdminAccountService {
         AdminUser admin = requireAdmin(adminId);
         if (!"NORMAL".equals(status) && !"DISABLED".equals(status)) {
             throw new BusinessException("VALIDATION_FAILED", HttpStatus.UNPROCESSABLE_ENTITY, "状态必须为 NORMAL 或 DISABLED");
+        }
+        if ("DISABLED".equals(status) && "NORMAL".equals(admin.getStatus()) && isSuperAdmin(adminId)) {
+            List<Long> activeSuperAdmins = jdbcTemplate.query("SELECT u.id FROM sys_admin_user u "
+                            + "JOIN sys_admin_user_role aur ON aur.admin_user_id = u.id "
+                            + "JOIN sys_role r ON r.id = aur.role_id AND r.role_code = 'SUPER_ADMIN' "
+                            + "WHERE u.status = 'NORMAL' ORDER BY u.id FOR UPDATE",
+                    (rs, rowNum) -> rs.getLong(1));
+            if (activeSuperAdmins.size() <= 1) {
+                throw new BusinessException("STATE_CONFLICT", HttpStatus.CONFLICT, "不能停用最后一个正常状态的超级管理员");
+            }
         }
         admin.setStatus(status);
         adminMapper.updateById(admin);
@@ -116,18 +184,5 @@ public class AdminAccountService {
         }
     }
 
-    private void syncRoles(long adminId, List<String> roleCodes) {
-        // Delete existing role assignments
-        jdbcTemplate.update("DELETE FROM sys_admin_user_role WHERE admin_user_id = ?", adminId);
-        // Insert new role assignments
-        if (roleCodes != null && !roleCodes.isEmpty()) {
-            LocalDateTime now = LocalDateTime.now();
-            for (String roleCode : roleCodes) {
-                jdbcTemplate.update(
-                        "INSERT INTO sys_admin_user_role (admin_user_id, role_id, created_at) " +
-                                "SELECT ?, r.id, ? FROM sys_role r WHERE r.role_code = ? AND r.status = 'NORMAL'",
-                        adminId, now, roleCode);
-            }
-        }
-    }
+    public record PermissionView(String code, String name) { }
 }

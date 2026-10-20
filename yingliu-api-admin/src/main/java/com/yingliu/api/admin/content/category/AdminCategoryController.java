@@ -68,7 +68,7 @@ public class AdminCategoryController {
     @PostMapping
     @OperLog(module = "TAXONOMY", action = "CREATE", targetType = "CATEGORY", detail = "创建分类")
     public ResponseEntity<ApiResponse<CategoryDtos.View>> create(@Valid @RequestBody CategoryDtos.Create body, HttpServletRequest request) {
-        authorizer.require("category:manage");
+        authorizer.require("category:create");
         ContentCategory category = service.create(body.name(), body.icon(), body.sort(), body.status());
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.ok(view(category), traceId(request)));
     }
@@ -76,7 +76,7 @@ public class AdminCategoryController {
     @PatchMapping("/{categoryId}")
     @OperLog(module = "TAXONOMY", action = "UPDATE", targetType = "CATEGORY")
     public ApiResponse<CategoryDtos.View> update(@PathVariable long categoryId, @Valid @RequestBody CategoryDtos.Update body, HttpServletRequest request) {
-        authorizer.require("category:manage");
+        authorizer.require("category:update");
         if (body.name() == null && body.icon() == null && body.sort() == null && body.status() == null) {
             throw new BusinessException("VALIDATION_FAILED", HttpStatus.UNPROCESSABLE_ENTITY, "至少提供一个待更新字段");
         }
@@ -86,7 +86,7 @@ public class AdminCategoryController {
     @DeleteMapping("/{categoryId}")
     @OperLog(module = "TAXONOMY", action = "DELETE", targetType = "CATEGORY")
     public ApiResponse<Void> delete(@PathVariable long categoryId, HttpServletRequest request) {
-        authorizer.require("category:manage");
+        authorizer.require("category:delete");
         service.delete(categoryId);
         return ApiResponse.ok(null, traceId(request));
     }
@@ -95,7 +95,7 @@ public class AdminCategoryController {
     @PostMapping("/{categoryId}/restore")
     @OperLog(module = "TAXONOMY", action = "RESTORE", targetType = "CATEGORY", detail = "恢复分类")
     public ApiResponse<CategoryDtos.View> restore(@PathVariable long categoryId, HttpServletRequest request) {
-        authorizer.require("category:manage");
+        authorizer.require("category:restore");
         return ApiResponse.ok(view(service.restore(categoryId)), traceId(request));
     }
 

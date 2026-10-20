@@ -15,6 +15,9 @@ public interface AppUserMapper extends BaseMapper<AppUser> {
     @Select("SELECT * FROM sys_user WHERE phone_hmac = #{phoneHmac} AND deleted = 0 LIMIT 1")
     AppUser selectByPhoneHmac(@Param("phoneHmac") String phoneHmac);
 
+    @Select("SELECT * FROM sys_user WHERE phone_hmac = #{phoneHmac} LIMIT 1")
+    AppUser selectAnyByPhoneHmac(@Param("phoneHmac") String phoneHmac);
+
     /** 用户是否为正常状态（公开内容可见性校验用） */
     @Select("SELECT COUNT(*) FROM sys_user WHERE id = #{userId} AND deleted = 0 AND status = 'NORMAL'")
     int countNormal(@Param("userId") long userId);
@@ -26,6 +29,11 @@ public interface AppUserMapper extends BaseMapper<AppUser> {
             + "ORDER BY follower_count DESC, id ASC LIMIT #{limit}</script>")
     List<AppUser> selectByKeyword(@Param("q") String q, @Param("limit") int limit);
 
+    @Select("<script>SELECT * FROM sys_user WHERE deleted = 0 AND status = 'NORMAL' "
+            + "AND (nickname LIKE CONCAT('%', #{keyword}, '%') OR CAST(id AS CHAR) LIKE CONCAT('%', #{keyword}, '%')) "
+            + "<if test='cursorId != null'>AND id &lt; #{cursorId} </if>ORDER BY id DESC LIMIT #{limit}</script>")
+    List<AppUser> searchAuthors(@Param("keyword") String keyword, @Param("cursorId") Long cursorId, @Param("limit") int limit);
+
     /** 关注数原子增减（关注时 +1 / 取关时 -1，不低于 0） */
     @Update("UPDATE sys_user SET following_count = GREATEST(0, CAST(following_count AS SIGNED) + #{delta}), updated_at = NOW(3) WHERE id = #{userId}")
     int adjustFollowingCount(@Param("userId") long userId, @Param("delta") int delta);
@@ -33,4 +41,8 @@ public interface AppUserMapper extends BaseMapper<AppUser> {
     /** 粉丝数原子增减 */
     @Update("UPDATE sys_user SET follower_count = GREATEST(0, CAST(follower_count AS SIGNED) + #{delta}), updated_at = NOW(3) WHERE id = #{userId}")
     int adjustFollowerCount(@Param("userId") long userId, @Param("delta") int delta);
+
+    /** 视频获赞时同步作者聚合计数。 */
+    @Update("UPDATE sys_user SET like_received_count = GREATEST(0, CAST(like_received_count AS SIGNED) + #{delta}), updated_at = NOW(3) WHERE id = #{userId}")
+    int adjustLikeReceivedCount(@Param("userId") long userId, @Param("delta") int delta);
 }

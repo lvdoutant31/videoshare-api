@@ -11,7 +11,7 @@ public interface ModerationService {
     Comment restoreComment(long id, long actor);
     Comment deleteComment(long id, long actor, String reason);
     void deleteComments(List<Long> ids, long actor, String reason);
-    ServicePage<Report> reports(long page, long size, String status, String targetType);
+    ServicePage<Report> reports(long page, long size, String status, String targetType, String riskLevel);
     Report report(long id);
     void claimReport(long id, long actor);
     void resolveReport(long id, long actor, String resolution, String note);
@@ -24,5 +24,7 @@ public interface ModerationService {
     record ModerationHistory(String action, String operator, LocalDateTime createdAt, String reason) {}
     record Report(long id, long reporterId, String targetType, long targetId, String reasonCode, String description,
                   String status, String riskLevel, Long assigneeAdminId, String resolution, String resolutionNote,
-                  LocalDateTime resolvedAt, LocalDateTime createdAt, LocalDateTime updatedAt) {}
+                  LocalDateTime resolvedAt, LocalDateTime createdAt, LocalDateTime updatedAt,
+                  String targetSummary, String reporter, String reason, String assignee,
+                  String targetSnapshot, List<ModerationHistory> history) {}
 }

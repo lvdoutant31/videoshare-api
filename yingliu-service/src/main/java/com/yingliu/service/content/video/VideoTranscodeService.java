@@ -80,6 +80,11 @@ public class VideoTranscodeService {
 
     @Transactional
     public void complete(WorkItem item, MediaResource media) {
+        complete(item, media, null);
+    }
+
+    @Transactional
+    public void complete(WorkItem item, MediaResource media, MediaResource cover) {
         MediaResource existing = mediaMapper.selectOne(new LambdaQueryWrapper<MediaResource>()
                 .eq(MediaResource::getRelativePath, media.getRelativePath())
                 .last("LIMIT 1"));
@@ -92,6 +97,33 @@ public class VideoTranscodeService {
         if (transcodeMapper.complete(item.transcodeId(), item.leaseStartedAt(), media.getId()) == 0) {
             throw new IllegalStateException("转码任务租约已失效: " + item.transcodeId());
         }
+        if (cover != null) {
+            MediaResource existingCover = mediaMapper.selectOne(new LambdaQueryWrapper<MediaResource>()
+                    .eq(MediaResource::getRelativePath, cover.getRelativePath()).last("LIMIT 1"));
+            if (existingCover == null) mediaMapper.insert(cover);
+            else {
+                cover.setId(existingCover.getId());
+                mediaMapper.updateById(cover);
+            }
+            videoMapper.attachGeneratedCover(item.videoId(), cover.getId());
+        }
+    }
+
+    /** Queue existing videos once when they predate generated poster support. */
+    public int enqueueMissingCovers() {
+        List<Video> videos = videoMapper.selectList(new LambdaQueryWrapper<Video>()
+                .isNotNull(Video::getOriginalMediaId).isNull(Video::getCoverMediaId));
+        int queued = 0;
+        for (Video video : videos) {
+            VideoTranscode task = transcodeMapper.selectOne(new LambdaQueryWrapper<VideoTranscode>()
+                    .eq(VideoTranscode::getVideoId, video.getId())
+                    .eq(VideoTranscode::getDefinition, DEFINITION).last("LIMIT 1"));
+            if (task == null || "SUCCEEDED".equals(task.getStatus())) {
+                enqueue(video.getId());
+                queued++;
+            }
+        }
+        return queued;
     }
 
     public void fail(WorkItem item, String code, String message) {

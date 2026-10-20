@@ -1,5 +1,6 @@
 package com.yingliu.service.moderation;
 
+import com.yingliu.common.exception.BusinessException;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
@@ -19,9 +20,84 @@ import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.anyLong;
 import static org.mockito.Mockito.when;
 
 class JdbcModerationServiceTest {
+
+    @Test
+    void reportFiltersNormalizeLegacyStatesAndRespectObjectRiskAndPageSize() {
+        JdbcTemplate db = mock(JdbcTemplate.class);
+        when(db.queryForObject(anyString(), eq(Long.class), any(Object[].class))).thenReturn(0L);
+        AtomicReference<String> sql = new AtomicReference<>();
+        AtomicReference<Object[]> args = new AtomicReference<>();
+        doAnswer(invocation -> {
+            sql.set(invocation.getArgument(0));
+            args.set((Object[]) invocation.getRawArguments()[2]);
+            return List.of();
+        }).when(db).query(anyString(), org.mockito.ArgumentMatchers.<RowMapper<ModerationService.Report>>any(), any(Object[].class));
+
+        new JdbcModerationService(db).reports(2, 10, "PROCESSING", "COMMENT", "HIGH");
+
+        assertThat(sql.get()).contains("r.status='CLAIMED'", "r.resolution='REJECTED'", "r.target_type=?", "r.risk_level=?", "LEFT JOIN sys_report_reason", "LIMIT ?,?");
+        assertThat(args.get()).containsExactly("PROCESSING", "COMMENT", "HIGH", 10L, 10L);
+    }
+
+    @Test
+    void claimRejectsALostRaceAndDoesNotWriteASuccessAudit() {
+        JdbcTemplate db = mock(JdbcTemplate.class);
+        assertThatThrownBy(() -> new JdbcModerationService(db).claimReport(101, 7))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(error -> assertThat(((BusinessException) error).getCode()).isEqualTo("REPORT_ALREADY_CLAIMED"));
+        verify(db, never()).update(contains("INSERT INTO sys_audit_log"), any(Object[].class));
+    }
+
+    @Test
+    void claimedReportsCanOnlyBeFinishedByTheirAssigneeAndAreAudited() {
+        JdbcTemplate db = mock(JdbcTemplate.class);
+        when(db.update(contains("AND assignee_admin_id=?"), eq("RESOLVED"), eq("RESOLVED"), eq("处理完毕"), eq(101L), eq(7L))).thenReturn(1);
+        new JdbcModerationService(db).resolveReport(101, 7, "RESOLVED", " 处理完毕 ");
+        verify(db).update(contains("INSERT INTO sys_audit_log"), anyLong(), eq(7L), eq("REPORT_RESOLVE"), eq("REPORT"), eq(101L), eq("处理完毕"));
+        assertThatThrownBy(() -> new JdbcModerationService(db).resolveReport(101, 8, "RESOLVED", "越权处理"))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(error -> assertThat(((BusinessException) error).getCode()).isEqualTo("REPORT_NOT_CLAIMED_BY_CURRENT_OPERATOR"));
+    }
+
+    @Test
+    void rejectStoresARejectedStatusAndRecordsTheReason() {
+        JdbcTemplate db = mock(JdbcTemplate.class);
+        when(db.update(contains("AND assignee_admin_id=?"), eq("REJECTED"), eq("REJECTED"), eq("证据不足"), eq(101L), eq(7L))).thenReturn(1);
+        new JdbcModerationService(db).rejectReport(101, 7, "证据不足");
+        verify(db).update(contains("INSERT INTO sys_audit_log"), anyLong(), eq(7L), eq("REPORT_REJECT"), eq("REPORT"), eq(101L), eq("证据不足"));
+    }
+
+    @Test
+    void reportDetailsIncludeContextSnapshotAndHistory() throws Exception {
+        JdbcTemplate db = mock(JdbcTemplate.class);
+        ResultSet row = mock(ResultSet.class);
+        when(row.getLong(1)).thenReturn(101L);
+        when(row.getString(3)).thenReturn("COMMENT");
+        when(row.getString(15)).thenReturn("被举报评论");
+        when(row.getString(16)).thenReturn("举报者");
+        when(row.getString(17)).thenReturn("暴力内容");
+        when(row.getString(18)).thenReturn("管理员");
+        when(row.getString(19)).thenReturn("原评论快照");
+        when(row.getTimestamp(13)).thenReturn(Timestamp.valueOf("2026-10-12 08:00:00"));
+        when(row.getTimestamp(14)).thenReturn(Timestamp.valueOf("2026-10-12 08:01:00"));
+        doAnswer(invocation -> {
+            RowMapper<ModerationService.Report> mapper = invocation.getArgument(1);
+            return mapper.mapRow(row, 0);
+        }).when(db).queryForObject(anyString(), org.mockito.ArgumentMatchers.<RowMapper<ModerationService.Report>>any(), eq(101L));
+
+        var report = new JdbcModerationService(db).report(101);
+        assertThat(report.targetSummary()).isEqualTo("被举报评论");
+        assertThat(report.reporter()).isEqualTo("举报者");
+        assertThat(report.reason()).isEqualTo("暴力内容");
+        assertThat(report.assignee()).isEqualTo("管理员");
+        assertThat(report.targetSnapshot()).isEqualTo("原评论快照");
+        assertThat(report.history()).extracting(ModerationService.ModerationHistory::action).containsExactly("REPORT_CREATED");
+    }
 
     @Test
     void commentsIncludeTheirVideoAndAuthor() throws Exception {

@@ -32,7 +32,7 @@ public class AppAnalyticsController {
     public ApiResponse<Void> batch(@RequestBody BatchBody body, HttpServletRequest request) {
         Long userId = actor.optionalUserId();
         List<AppAnalyticsService.EventInput> events = body.events().stream()
-                .map(e -> new AppAnalyticsService.EventInput(e.eventName(), e.occurredAt(), e.anonymousSessionId(),
+                .map(e -> new AppAnalyticsService.EventInput(e.eventId(), e.playSessionId(), e.eventName(), e.occurredAt(), e.anonymousSessionId(),
                         userId != null ? userId : e.userId(), e.videoId(), e.objectId(), e.pageSource(),
                         e.clientVersion(), e.networkType(), (String) request.getAttribute(TraceIdFilter.ATTRIBUTE),
                         e.properties()))
@@ -46,7 +46,7 @@ public class AppAnalyticsController {
     }
 
     public record BatchBody(List<EventBody> events) { }
-    public record EventBody(String eventName, String occurredAt, String anonymousSessionId, Long userId,
+    public record EventBody(String eventId, String playSessionId, String eventName, String occurredAt, String anonymousSessionId, Long userId,
                             Long videoId, Long objectId, String pageSource, String clientVersion,
                             String networkType, java.util.Map<String, Object> properties) { }
 }

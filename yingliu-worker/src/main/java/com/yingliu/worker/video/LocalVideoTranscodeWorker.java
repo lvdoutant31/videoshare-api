@@ -49,6 +49,7 @@ public class LocalVideoTranscodeWorker {
 
     private void process(VideoTranscodeService.WorkItem item) {
         Path temporary = null;
+        Path temporaryCover = null;
         String outputKey = outputKey(item);
         try {
             Path source = mediaRoot.resolve(item.sourceKey()).normalize();
@@ -76,14 +77,35 @@ public class LocalVideoTranscodeWorker {
             try (InputStream input = Files.newInputStream(temporary)) {
                 media.setUrl(storage.store(outputKey, input, media.getFileSize(), media.getContentType()));
             }
-            service.complete(item, media);
-            log.info("Video transcode completed: videoId={}, key={}", item.videoId(), outputKey);
+            MediaResource cover = null;
+            try {
+                temporaryCover = Files.createTempFile(temporaryDirectory, "cover-", ".jpg");
+                CommandResult coverResult = executor.execute(coverCommand(source, temporaryCover), properties.processingTimeout());
+                if (!coverResult.timedOut() && coverResult.exitCode() == 0 && Files.size(temporaryCover) > 0) {
+                    String coverKey = coverKey(item);
+                    cover = cover(temporaryCover, coverKey);
+                    try (InputStream input = Files.newInputStream(temporaryCover)) {
+                        cover.setUrl(storage.store(coverKey, input, cover.getFileSize(), cover.getContentType()));
+                    }
+                } else {
+                    log.warn("视频封面提取失败 videoId={}，请检查 FFmpeg 输出：{}", item.videoId(), coverResult.output());
+                    cover = null;
+                }
+            } catch (Exception coverError) {
+                log.warn("视频封面提取异常 videoId={}", item.videoId(), coverError);
+                cover = null;
+            }
+            service.complete(item, media, cover);
+            log.info("视频转码完成 videoId={}，媒体键={}", item.videoId(), outputKey);
         } catch (Exception exception) {
-            log.warn("Video transcode failed: videoId={}", item.videoId(), exception);
+            log.warn("视频转码失败 videoId={}", item.videoId(), exception);
             service.fail(item, "TRANSCODE_ERROR", safeMessage(exception));
         } finally {
             if (temporary != null) {
                 try { Files.deleteIfExists(temporary); } catch (IOException ignored) { }
+            }
+            if (temporaryCover != null) {
+                try { Files.deleteIfExists(temporaryCover); } catch (IOException ignored) { }
             }
         }
     }
@@ -103,6 +125,32 @@ public class LocalVideoTranscodeWorker {
         String identity = item.sourceSha256() == null || item.sourceSha256().isBlank()
                 ? "video-" + item.videoId() : item.sourceSha256();
         return "transcoded/720p/" + identity + ".mp4";
+    }
+
+    List<String> coverCommand(Path source, Path output) {
+        List<String> command = new ArrayList<>();
+        command.add(properties.ffmpegPath());
+        command.addAll(List.of("-y", "-ss", "1", "-i", source.toString(), "-frames:v", "1",
+                "-vf", "scale=640:-2", "-q:v", "3", output.toString()));
+        return command;
+    }
+
+    private String coverKey(VideoTranscodeService.WorkItem item) {
+        String identity = item.sourceSha256() == null || item.sourceSha256().isBlank()
+                ? "video-" + item.videoId() : item.sourceSha256();
+        return "covers/video/" + identity + ".jpg";
+    }
+
+    private MediaResource cover(Path file, String key) throws Exception {
+        MediaResource media = new MediaResource();
+        media.setResourceType("COVER");
+        media.setStorageState("READY");
+        media.setRelativePath(key);
+        media.setContentType("image/jpeg");
+        media.setFileSize(Files.size(file));
+        media.setSha256(sha256(file));
+        media.setBackupStatus("READY");
+        return media;
     }
 
     private MediaResource media(Path file, String key) throws Exception {

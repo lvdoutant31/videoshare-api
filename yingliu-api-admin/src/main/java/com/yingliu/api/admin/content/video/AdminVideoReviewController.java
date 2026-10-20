@@ -117,7 +117,7 @@ public class AdminVideoReviewController {
                 item.auditStatus(), item.publishStatus(), item.visibility(), item.riskLevel(), item.currentVersion(),
                 item.categories().stream().map(category -> new VideoDtos.CategoryView(String.valueOf(category.id()), category.name())).toList(),
                 item.tags().stream().map(tag -> new VideoDtos.TagView(String.valueOf(tag.id()), tag.name())).toList(),
-                time(item.scheduledAt()), time(item.publishedAt()), time(item.createdAt()), time(item.updatedAt()));
+                time(item.scheduledAt()), time(item.publishedAt()), item.watchTimeMs(), time(item.createdAt()), time(item.updatedAt()));
     }
 
     private VideoDtos.MediaView media(VideoAdminService.MediaView item) {

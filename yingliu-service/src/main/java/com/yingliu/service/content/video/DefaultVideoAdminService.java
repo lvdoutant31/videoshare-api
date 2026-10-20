@@ -82,8 +82,9 @@ public class DefaultVideoAdminService implements VideoAdminService {
                 .orderByDesc(Video::getUpdatedAt)
                 .orderByDesc(Video::getId));
         Map<Long, VideoAuthor> authors = authorsById(page.getRecords().stream().map(Video::getAuthorId).toList());
+        Map<Long, Long> watchTimes = watchTimes(page.getRecords().stream().map(Video::getId).toList());
         return new ServicePage<>(page.getRecords().stream()
-                .map(video -> summary(video, authors.get(video.getAuthorId())))
+                .map(video -> summary(video, authors.get(video.getAuthorId()), watchTimes.getOrDefault(video.getId(), 0L)))
                 .toList(), page.getTotal());
     }
 
@@ -98,7 +99,8 @@ public class DefaultVideoAdminService implements VideoAdminService {
         requireNormalAdmin(actorAdminId);
         Video video = requireVideo(videoId);
         String title = requireText(command.title(), 120, "视频标题不能为空");
-        String description = normalizeOptional(command.description(), 2000, "视频简介最多 2000 个字符");
+        Long mediaId = command.originalMediaId() == null ? video.getOriginalMediaId() : command.originalMediaId();
+        String description = ContentBody.normalize(command.description(), mediaId);
         String visibility = normalizeVisibility(command.visibility());
         List<Long> categoryIds = validateIds(command.categoryIds(), 1, 3, "分类");
         List<Long> tagIds = validateIds(command.tagIds(), 0, 10, "标签");
@@ -143,7 +145,23 @@ public class DefaultVideoAdminService implements VideoAdminService {
     @Transactional
     public VideoDetail createDraft(CreateDraftCommand command) {
         long authorId = currentAuthorId(command.actorAdminId());
-        requireMedia(command.originalMediaId(), "VIDEO_ORIGINAL");
+        return createContent(command, authorId, "DRAFT");
+    }
+
+    @Override
+    @Transactional
+    public VideoDetail createUserSubmission(long userId, Long mediaId, String title, String description,
+                                           List<Long> categories, List<Long> tags) {
+        requireEligibleAuthor(userId);
+        VideoDetail result = createContent(new CreateDraftCommand(userId, userId, mediaId, null,
+                title, description, null, categories, tags, "PUBLIC"), userId, "PENDING_REVIEW");
+        insertAuditRecord(requireVideo(result.id()), null, "SUBMITTED", null);
+        return result;
+    }
+
+    private VideoDetail createContent(CreateDraftCommand command, long authorId, String auditStatus) {
+        String body = ContentBody.normalize(command.description(), command.originalMediaId());
+        if (command.originalMediaId() != null) requireMedia(command.originalMediaId(), "VIDEO_ORIGINAL");
         if (command.coverMediaId() != null) requireMedia(command.coverMediaId(), "COVER");
         List<Long> categoryIds = validateIds(command.categoryIds(), 1, 3, "分类");
         List<Long> tagIds = validateIds(command.tagIds(), 0, 10, "标签");
@@ -155,10 +173,10 @@ public class DefaultVideoAdminService implements VideoAdminService {
         video.setOriginalMediaId(command.originalMediaId());
         video.setCoverMediaId(command.coverMediaId());
         video.setTitle(requireText(command.title(), 120, "视频标题不能为空"));
-        video.setDescription(normalizeOptional(command.description(), 2000, "视频简介最多 2000 个字符"));
+        video.setDescription(body);
         video.setSourceNote(normalizeOptional(command.sourceNote(), 128, "来源说明最多 128 个字符"));
         video.setVisibility(normalizeVisibility(command.visibility()));
-        video.setAuditStatus("APPROVED");
+        video.setAuditStatus(auditStatus);
         video.setPublishStatus("UNPUBLISHED");
         video.setRiskLevel("NONE");
         video.setManualWeight(0);
@@ -168,15 +186,6 @@ public class DefaultVideoAdminService implements VideoAdminService {
         videoMapper.insert(video);
         categoryIds.forEach(categoryId -> categoryMapMapper.insert(new VideoCategoryMap(video.getId(), categoryId)));
         tagIds.forEach(tagId -> tagMapMapper.insert(new VideoTagMap(video.getId(), tagId)));
-        // Admin-created videos are auto-approved — no manual review required
-        VideoAuditRecord autoApprove = new VideoAuditRecord();
-        autoApprove.setVideoId(video.getId());
-        autoApprove.setVideoVersion(video.getCurrentVersion());
-        autoApprove.setReviewerAdminId(command.actorAdminId());
-        autoApprove.setAction("AUTO_APPROVED");
-        autoApprove.setReason("管理员创建，免审核");
-        autoApprove.setReviewedAt(java.time.LocalDateTime.now());
-        auditRecordMapper.insert(autoApprove);
         return detail(video);
     }
 
@@ -279,8 +288,9 @@ public class DefaultVideoAdminService implements VideoAdminService {
     @Transactional
     public VideoDetail restore(long videoId, long actorAdminId) {
         requireNormalAdmin(actorAdminId);
-        requireVideo(videoId);
+        Video video = requireVideo(videoId);
         if (videoMapper.restore(videoId, actorAdminId) != 1) throw stateConflict();
+        insertAuditRecord(video, null, "SUBMITTED", null);
         return get(videoId);
     }
 
@@ -304,8 +314,9 @@ public class DefaultVideoAdminService implements VideoAdminService {
         requireNormalAdmin(actorAdminId);
         return batch(videoIds, id -> {
             Video video = requireVideo(id);
-            if ("PUBLISHED".equals(video.getPublishStatus())) return true;
+            if ("PENDING_REVIEW".equals(video.getAuditStatus()) && "UNPUBLISHED".equals(video.getPublishStatus())) return true;
             if (videoMapper.restore(id, actorAdminId) != 1) throw stateConflict();
+            insertAuditRecord(video, null, "SUBMITTED", null);
             return true;
         });
     }
@@ -403,22 +414,31 @@ public class DefaultVideoAdminService implements VideoAdminService {
 
     private VideoDetail detail(Video video) {
         VideoAuthor author = requireEligibleAuthor(video.getAuthorId());
-        MediaResource original = requireMedia(video.getOriginalMediaId(), "VIDEO_ORIGINAL");
+        MediaResource original = video.getOriginalMediaId() == null ? null : requireMedia(video.getOriginalMediaId(), "VIDEO_ORIGINAL");
         MediaResource cover = video.getCoverMediaId() == null ? null : requireMedia(video.getCoverMediaId(), "COVER");
         Map<Long, ContentCategory> categories = categoriesById(mappedCategoryIds(video.getId()));
         Map<Long, ContentTag> tags = tagsById(mappedTagIds(video.getId()));
+        long watchTimeMs = watchTimes(List.of(video.getId())).getOrDefault(video.getId(), 0L);
         return new VideoDetail(video.getId(), author.getId(), author.getNickname(), video.getTitle(), video.getDescription(),
-                video.getSourceNote(), mediaView(original), cover == null ? null : mediaView(cover), video.getAuditStatus(),
+                video.getSourceNote(), original == null ? null : mediaView(original), cover == null ? null : mediaView(cover), video.getAuditStatus(),
                 video.getPublishStatus(), video.getVisibility(), video.getRiskLevel(), video.getCurrentVersion(),
                 categories.values().stream().map(item -> new CategoryView(item.getId(), item.getName())).toList(),
                 tags.values().stream().map(item -> new TagView(item.getId(), item.getName())).toList(),
-                video.getScheduledAt(), video.getPublishedAt(), video.getCreatedAt(), video.getUpdatedAt());
+                video.getScheduledAt(), video.getPublishedAt(), watchTimeMs, video.getCreatedAt(), video.getUpdatedAt());
     }
 
-    private VideoSummary summary(Video video, VideoAuthor author) {
+    private VideoSummary summary(Video video, VideoAuthor author, long watchTimeMs) {
         return new VideoSummary(video.getId(), video.getAuthorId(), author == null ? "" : author.getNickname(),
                 video.getTitle(), video.getAuditStatus(), video.getPublishStatus(), video.getVisibility(),
-                video.getCreatedAt(), video.getUpdatedAt());
+                watchTimeMs, video.getCreatedAt(), video.getUpdatedAt());
+    }
+
+    private Map<Long, Long> watchTimes(List<Long> ids) {
+        if (ids.isEmpty()) return Map.of();
+        List<DiscoverQueryRows.WatchTime> rows = videoMapper.selectWatchTimes(ids);
+        if (rows == null || rows.isEmpty()) return Map.of();
+        return rows.stream().collect(java.util.stream.Collectors.toMap(DiscoverQueryRows.WatchTime::getVideoId,
+                DiscoverQueryRows.WatchTime::getWatchTimeMs, Long::sum));
     }
 
     private Video requireVideo(long id) {
@@ -548,8 +568,7 @@ public class DefaultVideoAdminService implements VideoAdminService {
     private MediaView mediaView(MediaResource media) {
         return new MediaView(media.getId(), media.getResourceType(), media.getContentType(), media.getFileSize(),
                 media.getWidth(), media.getHeight(), media.getDurationMs(),
-                media.getUrl() != null ? media.getUrl()
-                        : media.getRelativePath() != null ? mediaStorage.getUrl(media.getRelativePath()) : null);
+                media.getRelativePath() != null ? mediaStorage.getUrl(media.getRelativePath()) : media.getUrl());
     }
 
     private BusinessException stateConflict() {

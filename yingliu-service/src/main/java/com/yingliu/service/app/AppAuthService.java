@@ -11,6 +11,12 @@ import java.util.List;
  */
 public interface AppAuthService {
 
+    /** 手机号密码注册；手机号必须尚未注册。 */
+    LoginResult registerByPassword(String phone, String password, String name, String agreementVersion);
+
+    /** 手机号密码登录。 */
+    LoginResult loginByPassword(String phone, String password);
+
     /** 发送手机号验证码；返回有效期秒数。开发模式（sms.send-enabled=false）固定 123456 */
     int sendPhoneCode(String phone, String clientIp);
 

@@ -67,6 +67,21 @@ public class AppAuthController {
                 service.getMe(result.userId())), traceId(request));
     }
 
+    @PostMapping("/auth/register")
+    public ApiResponse<Void> register(@Valid @RequestBody PasswordRegisterBody body, HttpServletRequest request) {
+        service.registerByPassword(body.phone(), body.password(), body.name(), body.agreementVersion());
+        return ApiResponse.ok(null, traceId(request));
+    }
+
+    @PostMapping("/auth/password/login")
+    public ApiResponse<AppAuthDtos.PhoneLoginResponse> passwordLogin(@Valid @RequestBody PasswordLoginBody body,
+                                                                      HttpServletRequest request) {
+        AppAuthService.LoginResult result = service.loginByPassword(body.phone(), body.password());
+        actor.login(result.userId());
+        return ApiResponse.ok(new AppAuthDtos.PhoneLoginResponse(actor.currentToken(), sessionTimeoutSeconds,
+                service.getMe(result.userId())), traceId(request));
+    }
+
     @PostMapping("/auth/logout")
     public ApiResponse<Void> logout(HttpServletRequest request) {
         actor.logout();
@@ -156,5 +171,11 @@ public class AppAuthController {
     public record LoginBody(@NotBlank @Pattern(regexp = "^1\\d{10}$") String phone,
                             @NotBlank @Size(min = 4, max = 6) String code,
                             String agreementVersion) { }
+    public record PasswordRegisterBody(@NotBlank @Pattern(regexp = "^1\\d{10}$") String phone,
+                                       @NotBlank @Size(min = 8, max = 64) String password,
+                                       @NotBlank @Size(max = 30) String name,
+                                       String agreementVersion) { }
+    public record PasswordLoginBody(@NotBlank @Pattern(regexp = "^1\\d{10}$") String phone,
+                                    @NotBlank @Size(min = 8, max = 64) String password) { }
     public record WecomCallbackBody(@NotBlank @Size(max = 512) String code, @NotBlank @Size(max = 128) String state) { }
 }

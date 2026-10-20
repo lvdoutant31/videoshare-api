@@ -50,7 +50,7 @@ public class OssStorageService implements MediaStorage {
         this.localRoot = localRoot.toAbsolutePath().normalize();
         this.objectMapper = objectMapper;
         this.ossClient = ossClient;
-        log.info("OSS storage initialized: endpoint={}, bucket={}", properties.endpoint(), bucketName);
+        log.info("OSS 媒体存储已就绪 bucket={}", bucketName);
     }
 
     @Override
@@ -68,7 +68,7 @@ public class OssStorageService implements MediaStorage {
             PutObjectRequest request = new PutObjectRequest(bucketName, key, localFile.toFile(), metadata);
             request.setCallback(callback);
             PutObjectResult result = ossClient.putObject(request);
-            log.debug("Uploaded to OSS: bucket={}, key={}", bucketName, key);
+            log.debug("媒体文件已上传至 OSS bucket={}，key={}", bucketName, key);
             return callbackUrl(result, key);
         } catch (RuntimeException ex) {
             if (!existedBefore) {

@@ -46,13 +46,9 @@ public class AdminAuthService {
      * @param clientIp 登录来源地址，仅用于可选的 IP 限流
      */
     public AdminSession login(String username, String password, String clientIp) {
-        log.info("Admin login: stage=attempt username={} clientIp={}", username, clientIp);
         loginGuard.beforeAttempt(username, clientIp);
         AdminAccount account = accountByUsername(username);
         if (account == null || !"NORMAL".equals(account.status()) || !BCrypt.checkpw(password, account.passwordHash())) {
-            String reason = account == null ? "account-not-found"
-                    : !"NORMAL".equals(account.status()) ? "account-status-" + account.status() : "password-mismatch";
-//            log.info("Admin login: stage=credentials result=deny username={} clientIp={} reason={}", username, clientIp, reason);
             loginGuard.onFailure(username);
             throw new BusinessException("LOGIN_FAILED", HttpStatus.UNAUTHORIZED, "用户名或密码错误");
         }
@@ -62,11 +58,8 @@ public class AdminAuthService {
         }
         jdbcTemplate.update("UPDATE sys_admin_user SET last_login_at = ?, updated_at = ? WHERE id = ?", LocalDateTime.now(), LocalDateTime.now(), account.id());
         AdminSession result = session(account.id());
-        String tokenValue = authorizationProperties.enabled() ? StpUtil.getTokenValue() : null;
-        log.info("登录传参: stage=complete result=success adminId={} username={} roles={} permissionCount={} expiresIn={} cookieAuthenticationEnabled={} cookieIssued={} tokenName={} tokenLength={}",
-                result.id(), result.username(), result.roles(), result.permissions().size(), result.expiresIn(),
-                authorizationProperties.enabled(), tokenValue != null && !tokenValue.isBlank(),
-                StpUtil.getTokenName(), tokenValue == null ? 0 : tokenValue.length());
+        log.info("管理员登录成功 adminId={} username={} roleCount={} permissionCount={}",
+                result.id(), result.username(), result.roles().size(), result.permissions().size());
         return result;
     }
 
@@ -92,8 +85,6 @@ public class AdminAuthService {
             throw new BusinessException("UNAUTHORIZED", HttpStatus.UNAUTHORIZED, "后台登录已失效");
         }
         AdminPermissionCache.Grants grants = permissionCache.grants(adminId);
-        log.info("Admin cookie authentication: stage=identity result=loaded adminId={} username={} roles={} permissions={}",
-                account.id(), account.username(), grants.roleCodes(), grants.permissions());
         return new AdminSession(account.id(), account.username(), grants.permissions(), grants.roleCodes(), expiresInSeconds());
     }
 

@@ -22,7 +22,6 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -32,7 +31,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "yingliu.admin.auth-bypass-admin-id=1001",
         "spring.autoconfigure.exclude=org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration,org.redisson.spring.starter.RedissonAutoConfigurationV2,cn.dev33.satoken.dao.SaTokenDaoRedisJackson"
 })
-@AutoConfigureMockMvc
+@AutoConfigureMockMvc(addFilters = false)
 class AdminVideoIntegrationTest {
     private static final long ADMIN_ID = 1001L;
     private static final long AUTHOR_ID = 1002L;
@@ -115,6 +114,46 @@ class AdminVideoIntegrationTest {
     private ObjectMapper objectMapper;
     @Autowired
     private JdbcTemplate jdbcTemplate;
+    @org.springframework.boot.test.mock.mockito.MockBean
+    private com.yingliu.api.app.security.AppActorProvider appActor;
+
+    @Test
+    void appPublishesTextIntoReviewQueueAsCurrentUserAndRejectsEmptyContent() throws Exception {
+        org.mockito.Mockito.when(appActor.currentUserId()).thenReturn(AUTHOR_ID);
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart("/api/v1/app/content")
+                        .param("title", "用户纯文字").param("description", "<p><strong>正文</strong></p>")
+                        .param("categoryIds", String.valueOf(CATEGORY_ID)))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.data.auditStatus").value("PENDING_REVIEW"));
+        org.junit.jupiter.api.Assertions.assertEquals(AUTHOR_ID,
+                jdbcTemplate.queryForObject("SELECT author_id FROM video WHERE title = '用户纯文字'", Long.class));
+        org.junit.jupiter.api.Assertions.assertNull(
+                jdbcTemplate.queryForObject("SELECT original_media_id FROM video WHERE title = '用户纯文字'", Long.class));
+        org.junit.jupiter.api.Assertions.assertEquals(1,
+                jdbcTemplate.queryForObject("SELECT COUNT(*) FROM video_audit_record WHERE action = 'SUBMITTED'", Integer.class));
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart("/api/v1/app/content")
+                        .param("title", "空内容").param("description", "<p><br>&nbsp;</p>")
+                        .param("categoryIds", String.valueOf(CATEGORY_ID)))
+                .andExpect(status().isUnprocessableEntity());
+        jdbcTemplate.update("UPDATE sys_user SET status = 'MUTED' WHERE id = ?", AUTHOR_ID);
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart("/api/v1/app/content")
+                        .param("title", "禁止发布").param("description", "正文").param("categoryIds", String.valueOf(CATEGORY_ID)))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void adminCreatesAndEditsImageOnlyContentWithoutRequiringVideo() throws Exception {
+        String response = mockMvc.perform(post("/api/v1/admin/videos").contentType("application/json")
+                        .content("{\"title\":\"纯图片\",\"description\":\"<p><img src='/media/images/a.png'></p>\",\"categoryIds\":[\"1005\"],\"tagIds\":[]}"))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.data.originalMedia").isEmpty())
+                .andReturn().getResponse().getContentAsString();
+        String id = objectMapper.readTree(response).path("data").path("id").asText();
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch("/api/v1/admin/videos/" + id)
+                        .contentType("application/json").content("{\"title\":\"文字编辑\",\"description\":\"<p>更新正文</p>\",\"visibility\":\"PUBLIC\",\"categoryIds\":[\"1005\"],\"tagIds\":[]}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.description").value("<p>更新正文</p>"));
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch("/api/v1/admin/videos/" + id)
+                        .contentType("application/json").content("{\"title\":\"空编辑\",\"description\":\"<p><br></p>\",\"visibility\":\"PUBLIC\",\"categoryIds\":[\"1005\"],\"tagIds\":[]}"))
+                .andExpect(status().isUnprocessableEntity());
+    }
 
     @BeforeEach
     void setUp() {
@@ -137,14 +176,13 @@ class AdminVideoIntegrationTest {
     }
 
     @Test
-    void createsListsAndAutoApprovesAdminVideo() throws Exception {
+    void createsDraftAndSubmitsAdminVideoForReview() throws Exception {
         String response = mockMvc.perform(post("/api/v1/admin/videos")
                         .contentType("application/json")
                         .content("{\"authorId\":\"1002\",\"originalMediaId\":\"1003\",\"coverMediaId\":\"1004\",\"title\":\"测试视频\",\"categoryIds\":[\"1005\"],\"tagIds\":[\"1006\"],\"visibility\":\"PUBLIC\"}"))
                 .andExpect(status().isCreated())
-                .andExpect(header().exists("X-Trace-Id"))
                 .andExpect(jsonPath("$.code").value("OK"))
-                .andExpect(jsonPath("$.data.auditStatus").value("APPROVED"))
+                .andExpect(jsonPath("$.data.auditStatus").value("DRAFT"))
                 .andExpect(jsonPath("$.data.publishStatus").value("UNPUBLISHED"))
                 .andExpect(jsonPath("$.data.originalMedia.relativePath").doesNotExist())
                 .andExpect(jsonPath("$.data.categories[0].id").value("1005"))
@@ -156,14 +194,36 @@ class AdminVideoIntegrationTest {
                 .andExpect(jsonPath("$.data.total").value(1))
                 .andExpect(jsonPath("$.data.items[0].id").value(id));
 
-        // 管理员创建免审核；保留审计记录，也不允许再次提交已通过的视频。
-        org.junit.jupiter.api.Assertions.assertEquals(1, jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM video_audit_record WHERE video_id = ? AND action = 'AUTO_APPROVED'",
-                Integer.class, Long.parseLong(id)));
-
         mockMvc.perform(post("/api/v1/admin/videos/{videoId}/submit-review", id))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.auditStatus").value("PENDING_REVIEW"));
+        org.junit.jupiter.api.Assertions.assertEquals(1, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM video_audit_record WHERE video_id = ? AND action = 'SUBMITTED'",
+                Integer.class, Long.parseLong(id)));
+    }
+
+    @Test
+    void uploadsReviewsAndPublishesVideoInOrder() throws Exception {
+        String id = createDraft("完整发布流程");
+        mockMvc.perform(post("/api/v1/admin/videos/{videoId}/publish", id))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("STATE_CONFLICT"));
+        mockMvc.perform(post("/api/v1/admin/videos/{videoId}/submit-review", id))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.auditStatus").value("PENDING_REVIEW"));
+        mockMvc.perform(post("/api/v1/admin/reviews/videos/{videoId}/claim", id)
+                        .contentType("application/json").content("{\"version\":1}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.auditStatus").value("CLAIMED"));
+        mockMvc.perform(post("/api/v1/admin/reviews/videos/{videoId}/approve", id)
+                        .contentType("application/json").content("{\"currentVersion\":1}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.auditStatus").value("APPROVED"))
+                .andExpect(jsonPath("$.data.publishStatus").value("UNPUBLISHED"));
+        mockMvc.perform(post("/api/v1/admin/videos/{videoId}/publish", id))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.auditStatus").value("APPROVED"))
+                .andExpect(jsonPath("$.data.publishStatus").value("PUBLISHED"));
     }
 
     @Test
@@ -211,6 +271,34 @@ class AdminVideoIntegrationTest {
                         .content("{\"currentVersion\":1,\"reason\":\"重复处理\"}"))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("STATE_CONFLICT"));
+    }
+
+    @Test
+    void resubmittedVideoReturnsToReviewManagementQueue() throws Exception {
+        String id = createAndSubmit("重新审核视频");
+
+        mockMvc.perform(post("/api/v1/admin/reviews/videos/{videoId}/claim", id)
+                        .contentType("application/json")
+                        .content("{\"version\":1}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.auditStatus").value("CLAIMED"));
+        mockMvc.perform(post("/api/v1/admin/reviews/videos/{videoId}/request-revision", id)
+                        .contentType("application/json")
+                        .content("{\"currentVersion\":1,\"reason\":\"请补充说明\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.auditStatus").value("REVISION_REQUIRED"));
+        mockMvc.perform(get("/api/v1/admin/reviews/videos"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(0));
+
+        mockMvc.perform(post("/api/v1/admin/videos/{videoId}/submit-review", id))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.auditStatus").value("PENDING_REVIEW"));
+        mockMvc.perform(get("/api/v1/admin/reviews/videos"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(1))
+                .andExpect(jsonPath("$.data.items[0].id").value(id))
+                .andExpect(jsonPath("$.data.items[0].currentVersion").value(1));
     }
 
     @Test
@@ -292,30 +380,30 @@ class AdminVideoIntegrationTest {
     }
 
     private String createAndSubmit(String title) throws Exception {
-        // 人工审核覆盖的是已有待审草稿；不能再借管理员创建入口生成 DRAFT。
-        long videoId = 3000L + jdbcTemplate.queryForObject("SELECT COUNT(*) FROM video", Long.class);
-        jdbcTemplate.update("""
-                INSERT INTO video (id, author_id, title, original_media_id, cover_media_id,
-                    audit_status, publish_status, visibility, risk_level, manual_weight,
-                    current_version, deleted, created_by, updated_by, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, 'DRAFT', 'UNPUBLISHED', 'PUBLIC', 'NONE', 0, 1, 0, ?, ?, NOW(3), NOW(3))
-                """, videoId, AUTHOR_ID, title, ORIGINAL_MEDIA_ID, COVER_MEDIA_ID, ADMIN_ID, ADMIN_ID);
-        jdbcTemplate.update("INSERT INTO video_category_map (video_id, category_id) VALUES (?, ?)",
-                videoId, CATEGORY_ID);
-        String id = Long.toString(videoId);
+        String id = createDraft(title);
         mockMvc.perform(post("/api/v1/admin/videos/{videoId}/submit-review", id))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.auditStatus").value("PENDING_REVIEW"));
         org.junit.jupiter.api.Assertions.assertEquals(1, jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM video_audit_record WHERE video_id = ? AND action = 'SUBMITTED'",
-                Integer.class, videoId));
+                Integer.class, Long.parseLong(id)));
         mockMvc.perform(post("/api/v1/admin/videos/{videoId}/submit-review", id))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("STATE_CONFLICT"));
         org.junit.jupiter.api.Assertions.assertEquals(1, jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM video_audit_record WHERE video_id = ? AND action = 'SUBMITTED'",
-                Integer.class, videoId));
+                Integer.class, Long.parseLong(id)));
         return id;
+    }
+
+    private String createDraft(String title) throws Exception {
+        String response = mockMvc.perform(post("/api/v1/admin/videos")
+                        .contentType("application/json")
+                        .content("{\"authorId\":\"1002\",\"originalMediaId\":\"1003\",\"coverMediaId\":\"1004\",\"title\":\"" + title + "\",\"categoryIds\":[\"1005\"],\"tagIds\":[],\"visibility\":\"PUBLIC\"}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.auditStatus").value("DRAFT"))
+                .andReturn().getResponse().getContentAsString();
+        return objectMapper.readTree(response).path("data").path("id").asText();
     }
 
     private void insertSecondAdmin() {
@@ -340,6 +428,26 @@ class AdminVideoIntegrationTest {
 
         mockMvc.perform(post("/api/v1/admin/videos/{videoId}/restore", id))
                 .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.auditStatus").value("PENDING_REVIEW"))
+                .andExpect(jsonPath("$.data.publishStatus").value("UNPUBLISHED"));
+        mockMvc.perform(get("/api/v1/admin/reviews/videos"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(1))
+                .andExpect(jsonPath("$.data.items[0].id").value(id));
+        mockMvc.perform(post("/api/v1/admin/videos/{videoId}/publish", id))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("STATE_CONFLICT"));
+        mockMvc.perform(post("/api/v1/admin/reviews/videos/{videoId}/claim", id)
+                        .contentType("application/json")
+                        .content("{\"version\":1}"))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/admin/reviews/videos/{videoId}/approve", id)
+                        .contentType("application/json")
+                        .content("{\"currentVersion\":1}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.auditStatus").value("APPROVED"));
+        mockMvc.perform(post("/api/v1/admin/videos/{videoId}/publish", id))
+                .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.publishStatus").value("PUBLISHED"));
 
         mockMvc.perform(delete("/api/v1/admin/videos/{videoId}", id)
@@ -351,6 +459,32 @@ class AdminVideoIntegrationTest {
         mockMvc.perform(get("/api/v1/admin/videos/{videoId}", id))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("VIDEO_NOT_FOUND"));
+    }
+
+    @Test
+    void batchRestoreSubmitsOffShelfVideosForReview() throws Exception {
+        String id = createAndApprove("批量重审视频");
+        mockMvc.perform(post("/api/v1/admin/videos/{videoId}/publish", id)).andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/admin/videos/{videoId}/off-shelf", id)
+                        .contentType("application/json").content("{\"reason\":\"批量测试\"}"))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/v1/admin/videos/batch/restore")
+                        .contentType("application/json").content("{\"videoIds\":[" + id + "]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.succeeded[0]").value(Long.parseLong(id)));
+        mockMvc.perform(get("/api/v1/admin/videos/{videoId}", id))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.auditStatus").value("PENDING_REVIEW"))
+                .andExpect(jsonPath("$.data.publishStatus").value("UNPUBLISHED"));
+
+        mockMvc.perform(post("/api/v1/admin/videos/batch/restore")
+                        .contentType("application/json").content("{\"videoIds\":[" + id + "]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.succeeded[0]").value(Long.parseLong(id)));
+        org.junit.jupiter.api.Assertions.assertEquals(2, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM video_audit_record WHERE video_id = ? AND action = 'SUBMITTED'",
+                Integer.class, Long.parseLong(id)));
     }
 
     @Test

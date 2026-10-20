@@ -9,6 +9,11 @@
     <artifactId>yingliu-service</artifactId>
     <dependencies>
         <dependency>
+            <groupId>org.jsoup</groupId>
+            <artifactId>jsoup</artifactId>
+            <version>1.21.2</version>
+        </dependency>
+        <dependency>
             <groupId>com.yingliu</groupId>
             <artifactId>yingliu-wecom</artifactId>
         </dependency>

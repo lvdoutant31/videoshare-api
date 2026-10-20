@@ -19,6 +19,10 @@ public interface AppCommentService {
     /** 发布一级评论或回复；返回审核状态 */
     PublishResult publish(long userId, long videoId, String content, Long replyToCommentId);
 
+    CursorPage<ReplyNotificationView> listReplyNotifications(long userId, String cursor, int limit);
+
+    void markReplyNotificationRead(long userId, long notificationId);
+
     /** 点赞评论（目标状态幂等） */
     TargetState setCommentLike(long userId, long commentId, boolean active);
 
@@ -43,4 +47,8 @@ public interface AppCommentService {
     record PublishResult(String id, String status, String message) { }
 
     record TargetState(boolean active, long count) { }
+
+    record ReplyNotificationView(String id, CommentUser actor, String videoId, String videoTitle,
+                                 String commentId, String replyToCommentId, String content,
+                                 String sourceContent, String createdAt, String readAt) { }
 }

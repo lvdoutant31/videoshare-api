@@ -103,7 +103,7 @@ public class AppShareController {
 
     private VideoAppService.FeedItem toFeed(VideoAppService.VideoDetail detail) {
         return new VideoAppService.FeedItem(detail.id(), detail.authorId(), detail.authorNickname(), detail.title(),
-                detail.description(), detail.durationMs(), detail.videoUrl(), detail.cover(), detail.tags(), detail.stats(),
+                detail.description(), detail.durationMs(), detail.videoUrl(), detail.cover(), detail.categories(), detail.tags(), detail.stats(),
                 detail.publishedAt(), detail.viewerState(), detail.authorFollowing());
     }
 

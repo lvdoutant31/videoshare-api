@@ -9,6 +9,7 @@ import com.yingliu.common.exception.BusinessException;
 import com.yingliu.framework.web.TraceIdFilter;
 import com.yingliu.domain.content.video.AdminUser;
 import com.yingliu.service.admin.AdminAccountService;
+import com.yingliu.service.admin.AdminAppAccountBindingService;
 import com.yingliu.service.content.shared.ServicePage;
 import com.yingliu.service.content.video.mapper.AdminUserMapper;
 import jakarta.servlet.http.HttpServletRequest;
@@ -27,6 +28,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.PutMapping;
 
 import java.util.List;
 
@@ -39,12 +41,60 @@ public class AdminAccountController {
     private final AdminAccountService service;
     private final AdminPermissionAuthorizer authorizer;
     private final AdminSessionRevoker sessionRevoker;
+    private final AdminAppAccountBindingService appAccountBinding;
 
     public AdminAccountController(AdminAccountService service, AdminPermissionAuthorizer authorizer,
-                                  AdminSessionRevoker sessionRevoker) {
+                                  AdminSessionRevoker sessionRevoker, AdminAppAccountBindingService appAccountBinding) {
         this.service = service;
         this.authorizer = authorizer;
         this.sessionRevoker = sessionRevoker;
+        this.appAccountBinding = appAccountBinding;
+    }
+
+    @GetMapping("/{adminId}/app-account")
+    public ApiResponse<AdminAppAccountBindingService.BindingView> appAccount(
+            @PathVariable long adminId, HttpServletRequest request) {
+        requireSuperAdmin();
+        return ApiResponse.ok(appAccountBinding.get(adminId), traceId(request));
+    }
+
+    @PutMapping("/{adminId}/app-account")
+    @OperLog(module = "ADMIN", action = "UPDATE", targetType = "ADMIN_ACCOUNT", detail = "绑定手机号")
+    public ApiResponse<AdminAppAccountBindingService.BindingView> bindAppAccount(
+            @PathVariable long adminId, @Valid @RequestBody AdminAccountDtos.BindPhone body,
+            HttpServletRequest request) {
+        requireSuperAdmin();
+        return ApiResponse.ok(appAccountBinding.bind(adminId, body.phone(), body.password()), traceId(request));
+    }
+
+    private void requireSuperAdmin() {
+        long operatorId = authorizer.require("admin:view");
+        if (!service.getRoleCodes(operatorId).contains("SUPER_ADMIN")) {
+            throw new BusinessException("PERMISSION_DENIED", HttpStatus.FORBIDDEN, "仅超级管理员可为其他管理员绑定手机号");
+        }
+    }
+
+    @GetMapping("/permissions")
+    public ApiResponse<List<AdminAccountDtos.PermissionItem>> listPermissions(HttpServletRequest request) {
+        authorizer.require("admin:permissions");
+        return ApiResponse.ok(service.permissionCatalog().stream()
+                .map(p -> new AdminAccountDtos.PermissionItem(p.code(), p.name())).toList(), traceId(request));
+    }
+
+    @GetMapping("/{adminId}/permissions")
+    public ApiResponse<List<String>> getPermissions(@PathVariable long adminId, HttpServletRequest request) {
+        authorizer.require("admin:permissions");
+        return ApiResponse.ok(service.getPermissionCodes(adminId), traceId(request));
+    }
+
+    @PutMapping("/{adminId}/permissions")
+    @OperLog(module = "ADMIN", action = "UPDATE", targetType = "ADMIN_ACCOUNT", detail = "配置管理员权限")
+    public ApiResponse<List<String>> updatePermissions(@PathVariable long adminId,
+            @Valid @RequestBody AdminAccountDtos.UpdatePermissions body, HttpServletRequest request) {
+        authorizer.require("admin:permissions");
+        service.updatePermissions(adminId, body.permissionCodes());
+        sessionRevoker.refreshGrants();
+        return ApiResponse.ok(service.getPermissionCodes(adminId), traceId(request));
     }
 
     @GetMapping("/roles")
@@ -82,18 +132,6 @@ public class AdminAccountController {
         authorizer.require("admin:create");
         AdminUser admin = service.create(body.username(), body.password());
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.ok(view(admin), traceId(request)));
-    }
-
-    @PatchMapping("/{adminId}/roles")
-    @OperLog(module = "ADMIN", action = "UPDATE", targetType = "ADMIN_ACCOUNT", detail = "编辑管理员角色")
-    public ApiResponse<AdminAccountDtos.View> updateRoles(
-            @PathVariable long adminId, @Valid @RequestBody AdminAccountDtos.UpdateRoles body,
-            HttpServletRequest request) {
-        authorizer.require("admin:update");
-        AdminUser admin = service.updateRoles(adminId, body.roleCodes());
-        // 授权关系已变，刷新缓存使新权限在下一个请求生效；不必打断当前会话。
-        sessionRevoker.refreshGrants();
-        return ApiResponse.ok(view(admin), traceId(request));
     }
 
     @PostMapping("/{adminId}/password")

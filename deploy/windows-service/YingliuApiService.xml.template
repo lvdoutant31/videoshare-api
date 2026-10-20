@@ -1,0 +1,16 @@
+<service>
+  <id>YingliuApi</id>
+  <name>Yingliu API</name>
+  <description>Yingliu video platform API service.</description>
+  <executable>__JAVA_EXE__</executable>
+  <arguments>-Xrs -Xms__JAVA_XMS__ -Xmx__JAVA_XMX__ -jar "%BASE%\yingliu-api.jar" "--spring.config.additional-location=file:config/yingliu-env.properties"</arguments>
+  <workingdirectory>%BASE%</workingdirectory>
+  <startmode>Automatic</startmode>
+  <delayedAutoStart>true</delayedAutoStart>
+  <stoptimeout>90sec</stoptimeout>
+  <onfailure action="restart" delay="10 sec" />
+  <onfailure action="restart" delay="30 sec" />
+  <resetfailure>1 hour</resetfailure>
+  <logpath>%BASE%\logs</logpath>
+  <log mode="roll" />
+</service>

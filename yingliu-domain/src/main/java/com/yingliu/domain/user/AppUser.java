@@ -14,6 +14,7 @@ public class AppUser {
     private Long id;
     private byte[] phoneCiphertext;
     private String phoneHmac;
+    private String passwordHash;
     private String nickname;
     private Long avatarMediaId;
     private String bio;
@@ -39,6 +40,8 @@ public class AppUser {
     public void setPhoneCiphertext(byte[] phoneCiphertext) { this.phoneCiphertext = phoneCiphertext; }
     public String getPhoneHmac() { return phoneHmac; }
     public void setPhoneHmac(String phoneHmac) { this.phoneHmac = phoneHmac; }
+    public String getPasswordHash() { return passwordHash; }
+    public void setPasswordHash(String passwordHash) { this.passwordHash = passwordHash; }
     public String getNickname() { return nickname; }
     public void setNickname(String nickname) { this.nickname = nickname; }
     public Long getAvatarMediaId() { return avatarMediaId; }

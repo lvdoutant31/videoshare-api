@@ -3,6 +3,7 @@ package com.yingliu.service.app;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.yingliu.common.exception.BusinessException;
 import com.yingliu.domain.comment.VideoComment;
+import com.yingliu.domain.comment.CommentReplyNotification;
 import com.yingliu.domain.content.video.MediaResource;
 import com.yingliu.domain.content.video.Video;
 import com.yingliu.domain.governance.ContentReport;
@@ -12,6 +13,7 @@ import com.yingliu.domain.user.AppUser;
 import com.yingliu.media.storage.MediaStorage;
 import com.yingliu.service.app.mapper.AppUserMapper;
 import com.yingliu.service.app.mapper.ContentReportMapper;
+import com.yingliu.service.app.mapper.CommentReplyNotificationMapper;
 import com.yingliu.service.app.mapper.SysSensitiveWordMapper;
 import com.yingliu.service.app.mapper.UserCommentLikeMapper;
 import com.yingliu.service.app.mapper.VideoCommentMapper;
@@ -23,7 +25,6 @@ import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Profile;
-import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -54,6 +55,7 @@ public class DefaultAppCommentService implements AppCommentService {
     private final VideoStatsMapper statsMapper;
     private final ContentReportMapper reportMapper;
     private final SysSensitiveWordMapper sensitiveWordMapper;
+    private final CommentReplyNotificationMapper notificationMapper;
 
     /** 进程内敏感词缓存（管理端变更后需刷新；首期启动加载） */
     private List<SysSensitiveWord> sensitiveWords = List.of();
@@ -66,7 +68,8 @@ public class DefaultAppCommentService implements AppCommentService {
                                     VideoMapper videoMapper,
                                     VideoStatsMapper statsMapper,
                                     ContentReportMapper reportMapper,
-                                    SysSensitiveWordMapper sensitiveWordMapper) {
+                                    SysSensitiveWordMapper sensitiveWordMapper,
+                                    CommentReplyNotificationMapper notificationMapper) {
         this.commentMapper = commentMapper;
         this.commentLikeMapper = commentLikeMapper;
         this.userMapper = userMapper;
@@ -76,6 +79,7 @@ public class DefaultAppCommentService implements AppCommentService {
         this.statsMapper = statsMapper;
         this.reportMapper = reportMapper;
         this.sensitiveWordMapper = sensitiveWordMapper;
+        this.notificationMapper = notificationMapper;
     }
 
     @PostConstruct
@@ -119,7 +123,8 @@ public class DefaultAppCommentService implements AppCommentService {
         Long rootCommentId = 0L;
         if (replyToCommentId != null) {
             parent = commentMapper.selectById(replyToCommentId);
-            if (parent == null || parent.getDeletedAt() != null || !"NORMAL".equals(parent.getStatus())) {
+            if (parent == null || !Objects.equals(parent.getVideoId(), videoId)
+                    || parent.getDeletedAt() != null || !"NORMAL".equals(parent.getStatus())) {
                 throw new BusinessException("RESOURCE_NOT_FOUND", HttpStatus.NOT_FOUND, "被回复的评论不存在");
             }
             rootCommentId = parent.getRootCommentId() != null && parent.getRootCommentId() != 0
@@ -140,6 +145,19 @@ public class DefaultAppCommentService implements AppCommentService {
         comment.setHotScore(BigDecimal.valueOf(Instant.now().getEpochSecond()));
         commentMapper.insert(comment);
 
+        if (parent != null && "NORMAL".equals(status) && !Objects.equals(parent.getUserId(), userId)) {
+            CommentReplyNotification notification = new CommentReplyNotification();
+            notification.setRecipientUserId(parent.getUserId());
+            notification.setActorUserId(userId);
+            notification.setVideoId(videoId);
+            notification.setCommentId(comment.getId());
+            notification.setReplyToCommentId(parent.getId());
+            notification.setReplyContent(comment.getContent());
+            notification.setSourceContent(parent.getContent());
+            notification.setCreatedAt(LocalDateTime.now());
+            notificationMapper.insert(notification);
+        }
+
         if (rootCommentId != 0L && parent != null) {
             commentMapper.incrementReplyCount(rootCommentId);
         }
@@ -153,31 +171,51 @@ public class DefaultAppCommentService implements AppCommentService {
     }
 
     @Override
+    public CursorPage<ReplyNotificationView> listReplyNotifications(long userId, String cursor, int limit) {
+        int pageSize = Math.min(Math.max(limit, 1), MAX_LIST_LIMIT);
+        List<CommentReplyNotification> rows = notificationMapper.selectPage(userId, parseCursor(cursor), pageSize + 1);
+        boolean hasNext = rows.size() > pageSize;
+        List<CommentReplyNotification> page = hasNext ? rows.subList(0, pageSize) : rows;
+        List<ReplyNotificationView> views = page.stream().map(this::toNotificationView).toList();
+        String nextCursor = page.isEmpty() ? null : String.valueOf(page.get(page.size() - 1).getId());
+        return new CursorPage<>(views, hasNext ? nextCursor : null);
+    }
+
+    @Override
+    public void markReplyNotificationRead(long userId, long notificationId) {
+        if (notificationMapper.markRead(notificationId, userId) == 0) {
+            throw new BusinessException("RESOURCE_NOT_FOUND", HttpStatus.NOT_FOUND, "消息不存在");
+        }
+    }
+
+    private ReplyNotificationView toNotificationView(CommentReplyNotification value) {
+        AppUser actor = userMapper.selectById(value.getActorUserId());
+        String avatarUrl = null;
+        if (actor != null && actor.getAvatarMediaId() != null) {
+            MediaResource avatar = mediaMapper.selectById(actor.getAvatarMediaId());
+            if (avatar != null && avatar.getRelativePath() != null) avatarUrl = mediaStorage.getUrl(avatar.getRelativePath());
+        }
+        Video video = videoMapper.selectById(value.getVideoId());
+        return new ReplyNotificationView(String.valueOf(value.getId()),
+                new CommentUser(String.valueOf(value.getActorUserId()), actor == null ? "未知用户" : actor.getNickname(), avatarUrl),
+                String.valueOf(value.getVideoId()), video == null ? "视频" : video.getTitle(),
+                String.valueOf(value.getCommentId()), String.valueOf(value.getReplyToCommentId()),
+                value.getReplyContent(), value.getSourceContent(), String.valueOf(value.getCreatedAt()),
+                value.getReadAt() == null ? null : String.valueOf(value.getReadAt()));
+    }
+
+    @Override
     @Transactional
     public TargetState setCommentLike(long userId, long commentId, boolean active) {
-        VideoComment comment = requireVisibleComment(commentId);
-        boolean existed = commentLikeMapper.selectCount(new LambdaQueryWrapper<UserCommentLike>()
-                .eq(UserCommentLike::getUserId, userId).eq(UserCommentLike::getCommentId, commentId)) > 0;
-        if (active && !existed) {
-            UserCommentLike like = new UserCommentLike();
-            like.setUserId(userId);
-            like.setCommentId(commentId);
-            like.setCreatedAt(LocalDateTime.now());
-            try {
-                commentLikeMapper.insert(like);
-            } catch (DuplicateKeyException ignored) {
-                // 唯一约束兜底
-            }
-            commentMapper.adjustLikeCount(commentId, 1);
-            commentMapper.updateHotScore(commentId, HOT_SCORE_LIKE_BONUS);
-        } else if (!active && existed) {
-            commentLikeMapper.delete(new LambdaQueryWrapper<UserCommentLike>()
-                    .eq(UserCommentLike::getUserId, userId).eq(UserCommentLike::getCommentId, commentId));
-            commentMapper.adjustLikeCount(commentId, -1);
-            commentMapper.updateHotScore(commentId, -HOT_SCORE_LIKE_BONUS);
+        requireVisibleComment(commentId);
+        int changed = active
+                ? commentLikeMapper.insertIfAbsent(userId, commentId)
+                : commentLikeMapper.deleteByUserAndComment(userId, commentId);
+        if (changed == 1) {
+            int delta = active ? 1 : -1;
+            commentMapper.adjustLikeCountAndHotScore(commentId, delta, delta * HOT_SCORE_LIKE_BONUS);
         }
-        long count = comment.getLikeCount() == null ? 0 : comment.getLikeCount() + (active && !existed ? 1 : 0);
-        return new TargetState(active, Math.max(0, count));
+        return new TargetState(active, Math.max(0, commentMapper.selectLikeCountForUpdate(commentId)));
     }
 
     @Override

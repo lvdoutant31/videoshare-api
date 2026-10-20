@@ -5,6 +5,7 @@ import com.yingliu.api.admin.security.AdminPermissionAuthorizer;
 import com.yingliu.common.api.ApiResponse;
 import com.yingliu.framework.web.TraceIdFilter;
 import com.yingliu.service.admin.AdminModerationService;
+import com.yingliu.service.moderation.ModerationService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
@@ -20,10 +21,12 @@ import org.springframework.web.bind.annotation.*;
 public class AdminModerationController {
     private final AdminModerationService service;
     private final AdminPermissionAuthorizer authorizer;
+    private final ModerationService moderationService;
 
-    public AdminModerationController(AdminModerationService service, AdminPermissionAuthorizer authorizer) {
+    public AdminModerationController(AdminModerationService service, AdminPermissionAuthorizer authorizer, ModerationService moderationService) {
         this.service = service;
         this.authorizer = authorizer;
+        this.moderationService = moderationService;
     }
 
     @GetMapping("/comments")
@@ -56,7 +59,7 @@ public class AdminModerationController {
     @PostMapping("/reports/{id}/resolve")
     public ApiResponse<Void> resolveReport(@PathVariable long id, @Valid @RequestBody ResolveCommand command,
                                             HttpServletRequest request) {
-        service.resolveReport(id, authorizer.require("report:resolve"), command.resolution(), command.note());
+        moderationService.resolveReport(id, authorizer.require("report:resolve"), command.resolution(), command.note());
         return ApiResponse.ok(null, traceId(request));
     }
 
@@ -65,5 +68,6 @@ public class AdminModerationController {
     }
 
     public record CommentCommand(@NotBlank String status, String reason) { }
-    public record ResolveCommand(@NotBlank String resolution, String note) { }
+    public record ResolveCommand(@NotBlank @jakarta.validation.constraints.Pattern(regexp = "RESOLVED") String resolution,
+                                 @NotBlank @jakarta.validation.constraints.Size(max = 300) String note) { }
 }

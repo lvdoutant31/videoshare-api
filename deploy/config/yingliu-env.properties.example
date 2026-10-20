@@ -1,0 +1,61 @@
+# Copy this file to config/yingliu-env.properties on the server, then replace
+# every CHANGE_ME value. The launcher refuses to start while placeholders remain.
+
+spring.profiles.active=prod
+server.port=8080
+server.servlet.context-path=/videoshare
+server.shutdown=graceful
+server.forward-headers-strategy=framework
+
+# MySQL 8
+spring.datasource.url=jdbc:mysql://127.0.0.1:3306/yingliu_prod?useUnicode=true&characterEncoding=utf8&connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true
+spring.datasource.username=yingliu
+spring.datasource.password=CHANGE_ME_MYSQL_PASSWORD
+spring.flyway.enabled=true
+
+# Redis-compatible service
+spring.data.redis.host=127.0.0.1
+spring.data.redis.port=6379
+spring.data.redis.password=CHANGE_ME_REDIS_PASSWORD
+
+# Local video storage. Keep this path aligned with the Nginx media alias.
+media.storage-type=local
+media.storage-root=F:/videoshare/media
+media.local-url-prefix=/videoshare/media
+media.max-video-size-bytes=524288000
+spring.servlet.multipart.max-file-size=500MB
+spring.servlet.multipart.max-request-size=500MB
+
+# FFmpeg generates browser-compatible H.264/AAC faststart renditions.
+yingliu.worker.video-transcode.enabled=true
+yingliu.worker.video-transcode.ffmpeg-path=__FFMPEG_PATH__
+yingliu.worker.video-transcode.fixed-delay=5000
+yingliu.worker.video-transcode.processing-timeout=15m
+
+# Admin browser session
+sa-token.is-read-cookie=true
+sa-token.is-read-header=false
+sa-token.is-read-body=false
+sa-token.cookie.path=/
+sa-token.cookie.http-only=true
+sa-token.cookie.same-site=Lax
+sa-token.cookie.secure=true
+sa-token.timeout=43200
+sa-token.active-timeout=1800
+yingliu.admin.authorization-enabled=true
+yingliu.admin.cors.allowed-origin=
+
+# App authentication
+yingliu.app.phone-login-enabled=false
+yingliu.app.session-timeout-seconds=604800
+
+# WeCom OAuth. Leave disabled until every required value is configured.
+yingliu.wecom.enabled=false
+yingliu.wecom.mock-enabled=false
+yingliu.wecom.corp-id=
+yingliu.wecom.agent-id=0
+yingliu.wecom.secret=
+yingliu.wecom.redirect-uri=
+yingliu.wecom.identity-key=
+yingliu.wecom.state-ttl-seconds=300
+yingliu.wecom.cookie-secure=true

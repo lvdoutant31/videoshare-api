@@ -11,11 +11,11 @@ import java.util.List;
 public final class VideoDtos {
     private VideoDtos() { }
 
-    public record CreateDraft(String authorId, @NotBlank String originalMediaId, String coverMediaId,
-                              @NotBlank @Size(max = 120) String title, @Size(max = 2000) String description,
+    public record CreateDraft(String authorId, String originalMediaId, String coverMediaId,
+                              @NotBlank @Size(max = 120) String title, @Size(max = 100000) String description,
                               @Size(max = 128) String sourceNote, List<@NotBlank String> categoryIds,
                               List<@NotBlank String> tagIds, String visibility) { }
-    public record Update(@NotBlank @Size(max = 120) String title, @Size(max = 2000) String description,
+    public record Update(@NotBlank @Size(max = 120) String title, @Size(max = 100000) String description,
                          @NotBlank String visibility, List<@NotBlank String> categoryIds, List<@NotBlank String> tagIds) { }
     public record Claim(@NotNull @Min(1) Integer version) { }
     public record ApproveReview(@NotNull @Min(1) Integer currentVersion, @Size(max = 1000) String reason) { }
@@ -32,7 +32,7 @@ public final class VideoDtos {
     public record CategoryView(String id, String name) { }
     public record TagView(String id, String name) { }
     public record Summary(String id, String authorId, String authorNickname, String title, String auditStatus,
-                          String publishStatus, String visibility, String createdAt, String updatedAt) { }
+                          String publishStatus, String visibility, long watchTimeMs, String createdAt, String updatedAt) { }
     public record ReviewQueueItem(String id, String authorId, String authorNickname, String title, String riskLevel,
                                   int currentVersion, String submittedAt) { }
     public record AuditHistoryItem(String id, int videoVersion, String reviewerAdminId, String action, String reason,
@@ -41,5 +41,5 @@ public final class VideoDtos {
                          String sourceNote, MediaView originalMedia, MediaView coverMedia, String auditStatus,
                          String publishStatus, String visibility, String riskLevel, int currentVersion,
                          List<CategoryView> categories, List<TagView> tags, String scheduledAt, String publishedAt,
-                         String createdAt, String updatedAt) { }
+                         long watchTimeMs, String createdAt, String updatedAt) { }
 }

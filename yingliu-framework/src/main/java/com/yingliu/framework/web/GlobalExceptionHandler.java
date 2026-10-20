@@ -1,5 +1,6 @@
 package com.yingliu.framework.web;
 
+import org.apache.catalina.connector.ClientAbortException;
 import com.yingliu.common.api.ApiResponse;
 import com.yingliu.common.exception.BusinessException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -50,8 +51,20 @@ public class GlobalExceptionHandler {
         return response(HttpStatus.NOT_FOUND, "RESOURCE_NOT_FOUND", "资源不存在", request);
     }
 
+    @ExceptionHandler(ClientAbortException.class)
+    public void handleClientAbort(ClientAbortException exception, HttpServletRequest request) {
+        String traceId = (String) request.getAttribute(TraceIdFilter.ATTRIBUTE);
+        log.debug("Client disconnected while response was being written: method={}, uri={}, traceId={}",
+                request.getMethod(), request.getRequestURI(), traceId);
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResponse<Void>> handleUnexpected(Exception exception, HttpServletRequest request) {
+        ClientAbortException clientAbort = findClientAbort(exception);
+        if (clientAbort != null) {
+            handleClientAbort(clientAbort, request);
+            return null;
+        }
         String traceId = (String) request.getAttribute(TraceIdFilter.ATTRIBUTE);
         log.error("Unhandled server exception: method={}, uri={}, traceId={}",
                 request.getMethod(), request.getRequestURI(), traceId, exception);
@@ -61,5 +74,14 @@ public class GlobalExceptionHandler {
     private ResponseEntity<ApiResponse<Void>> response(HttpStatus status, String code, String message, HttpServletRequest request) {
         String traceId = (String) request.getAttribute(TraceIdFilter.ATTRIBUTE);
         return ResponseEntity.status(status).body(ApiResponse.fail(code, message, traceId));
+    }
+
+    private ClientAbortException findClientAbort(Throwable exception) {
+        Throwable current = exception;
+        while (current != null) {
+            if (current instanceof ClientAbortException abort) return abort;
+            current = current.getCause();
+        }
+        return null;
     }
 }

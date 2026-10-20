@@ -21,6 +21,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.validation.annotation.Validated;
 
 import java.util.List;
 
@@ -28,6 +29,7 @@ import java.util.List;
  * App 域评论（§2.4）：列表/回复/发布/点赞/删除/举报。
  */
 @RestController
+@Validated
 @ConditionalOnBean(AppCommentService.class)
 @RequestMapping("/api/v1/app")
 public class AppCommentController {
@@ -58,6 +60,20 @@ public class AppCommentController {
                                                                 @Valid @RequestBody PublishBody body,
                                                                 HttpServletRequest request) {
         return ApiResponse.ok(service.publish(actor.currentUserId(), videoId, body.content(), body.replyToCommentId()), traceId(request));
+    }
+
+    @GetMapping("/comment-notifications")
+    public ApiResponse<CursorPage<AppCommentService.ReplyNotificationView>> notifications(
+            @RequestParam(required = false) String cursor,
+            @RequestParam(defaultValue = "20") @Min(1) @Max(50) int limit,
+            HttpServletRequest request) {
+        return ApiResponse.ok(service.listReplyNotifications(actor.currentUserId(), cursor, limit), traceId(request));
+    }
+
+    @PutMapping("/comment-notifications/{notificationId}/read")
+    public ApiResponse<Void> readNotification(@PathVariable long notificationId, HttpServletRequest request) {
+        service.markReplyNotificationRead(actor.currentUserId(), notificationId);
+        return ApiResponse.ok(null, traceId(request));
     }
 
     @PutMapping("/comments/{commentId}/like")

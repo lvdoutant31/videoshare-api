@@ -21,20 +21,20 @@ public class SaTokenAdminActorProvider implements AdminActorProvider {
     public long currentAdminId() {
         if (bypassProperties.enabled()) {
             long adminId = bypassProperties.adminId();
-            log.info("Admin authorization: stage=identity decision=allow reason=local-bypass adminId={}", adminId);
+            log.debug("本地调试旁路使用管理员身份 adminId={}", adminId);
             return adminId;
         }
         if (!StpUtil.isLogin()) {
-            log.info("Admin authorization: stage=identity decision=deny reason=not-logged-in");
+            log.debug("当前请求没有已登录的管理员身份");
             throw new BusinessException("UNAUTHORIZED", HttpStatus.UNAUTHORIZED, "后台登录已失效");
         }
         Object loginId = StpUtil.getLoginId();
         try {
             long adminId = Long.parseLong(String.valueOf(loginId));
-            log.info("Admin authorization: stage=identity decision=allow reason=valid-cookie-login-id adminId={}", adminId);
+            log.debug("已从会话读取管理员身份 adminId={}", adminId);
             return adminId;
         } catch (NumberFormatException exception) {
-            log.info("Admin authorization: stage=identity decision=deny reason=invalid-login-id loginIdType={}",
+            log.warn("管理员会话身份格式无效 loginIdType={}",
                     loginId == null ? "null" : loginId.getClass().getSimpleName());
             throw new BusinessException("UNAUTHORIZED", HttpStatus.UNAUTHORIZED, "后台登录身份不合法");
         }

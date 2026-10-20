@@ -33,11 +33,13 @@ public interface AppInteractionService {
     /** 我的粉丝用户列表 */
     List<UserBriefView> listFollowers(long userId);
 
-    /** 作者公开资料（含统计） */
-    AuthorProfileView getAuthorProfile(long userId);
+    /** 作者公开资料（含统计和当前访问者的关注状态）；viewerId 可空（游客） */
+    AuthorProfileView getAuthorProfile(long userId, Long viewerId);
 
     /** 作者公开视频 ID（游标分页；对外返回字符串 id） */
     CursorPage<String> listAuthorVideoIds(long authorId, String cursor, int limit);
+
+    CursorPage<AuthorSearchView> searchAuthors(String keyword, String cursor, int limit, Long viewerId);
 
     /** 是否已关注 */
     boolean isFollowing(long followerId, long followeeId);
@@ -55,5 +57,7 @@ public interface AppInteractionService {
     record UserBriefView(String id, String nickname, String avatarUrl, boolean following) { }
 
     record AuthorProfileView(String id, String nickname, String avatarUrl, String bio,
-                             long followingCount, long followerCount, long likeReceivedCount) { }
+                             long followingCount, long followerCount, long likeReceivedCount, boolean following, long worksCount) { }
+
+    record AuthorSearchView(String id, String nickname, String avatarUrl, long worksCount, boolean following) { }
 }

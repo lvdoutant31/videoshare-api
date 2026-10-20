@@ -30,16 +30,20 @@ public class AppAnalyticsService {
             "video_play_pause", "video_play_progress", "video_play_complete", "feed_swipe",
             "video_play_failed", "like_toggled", "favorite_toggled", "comment_panel_open",
             "comment_published", "follow_toggled", "share_clicked", "share_channel_selected",
-            "internal_share_sent", "share_card_opened", "report_submitted", "profile_viewed");
+            "internal_share_sent", "share_card_opened", "report_submitted", "profile_viewed",
+            "search_submitted", "search_results_loaded", "search_empty", "search_failed", "search_result_clicked",
+            "publish_started", "publish_submitted", "publish_failed");
 
     private static final Set<String> FORBIDDEN_PROPERTY_KEYS = Set.of(
             "token", "accessToken", "phone", "ip", "ipHash", "wecomUserId", "wecomCorpId", "password");
 
     private final JdbcTemplate jdbc;
+    private final VideoWatchMetricsService watchMetrics;
     private final java.util.concurrent.atomic.AtomicLong idSeq = new java.util.concurrent.atomic.AtomicLong(0);
 
-    public AppAnalyticsService(JdbcTemplate jdbc) {
+    public AppAnalyticsService(JdbcTemplate jdbc, VideoWatchMetricsService watchMetrics) {
         this.jdbc = jdbc;
+        this.watchMetrics = watchMetrics;
     }
 
     /** 批量接收；逐条校验，非法事件整批拒绝（避免部分写入难以对账） */
@@ -64,8 +68,28 @@ public class AppAnalyticsService {
         }
         for (EventInput event : events) {
             insert(table, event);
+            recordWatchProgress(event);
         }
-        log.info("埋点入库 {} 条 -> {}", events.size(), table);
+        log.debug("埋点批次已写入：数量={}，数据表={}", events.size(), table);
+    }
+
+    private void recordWatchProgress(EventInput event) {
+        if (!"video_play_progress".equals(event.eventName()) || event.videoId() == null || event.properties() == null) return;
+        int watchedDeltaMs = number(event.properties().get("watchedDeltaMs"));
+        int positionMs = number(event.properties().get("positionMs"));
+        int durationMs = number(event.properties().get("durationMs"));
+        watchMetrics.record(event.eventId(), event.playSessionId(), event.videoId(), event.userId(),
+                event.anonymousSessionId(), watchedDeltaMs, positionMs, durationMs > 0 ? durationMs : null,
+                parseOccurredAt(event.occurredAt()));
+    }
+
+    private static int number(Object value) {
+        if (value instanceof Number number) return number.intValue();
+        try {
+            return value == null ? 0 : Integer.parseInt(String.valueOf(value));
+        } catch (NumberFormatException ignored) {
+            return 0;
+        }
     }
 
     private void insert(String table, EventInput event) {
@@ -110,7 +134,7 @@ public class AppAnalyticsService {
         return sb.append('}').toString();
     }
 
-    public record EventInput(String eventName, String occurredAt, String anonymousSessionId,
+    public record EventInput(String eventId, String playSessionId, String eventName, String occurredAt, String anonymousSessionId,
                              Long userId, Long videoId, Long objectId, String pageSource,
                              String clientVersion, String networkType, String traceId,
                              Map<String, Object> properties) { }

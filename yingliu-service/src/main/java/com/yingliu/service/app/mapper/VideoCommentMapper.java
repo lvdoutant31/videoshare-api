@@ -36,14 +36,17 @@ public interface VideoCommentMapper extends BaseMapper<VideoComment> {
             + "WHERE id = #{rootCommentId} AND status = 'NORMAL' AND deleted_at IS NULL")
     int incrementReplyCount(@Param("rootCommentId") long rootCommentId);
 
-    @Update("UPDATE video_comment "
-            + "SET like_count = GREATEST(0, CAST(like_count AS SIGNED) + #{delta}), updated_at = NOW(3) "
-            + "WHERE id = #{commentId}")
-    int adjustLikeCount(@Param("commentId") long commentId, @Param("delta") int delta);
+    @Update("UPDATE video_comment SET "
+            + "like_count = GREATEST(0, CAST(like_count AS SIGNED) + #{delta}), "
+            + "hot_score = hot_score + #{bonus}, updated_at = NOW(3) "
+            + "WHERE id = #{commentId} AND status = 'NORMAL' AND deleted_at IS NULL")
+    int adjustLikeCountAndHotScore(@Param("commentId") long commentId,
+                                   @Param("delta") int delta,
+                                   @Param("bonus") int bonus);
 
-    /** 综合热度调整（点赞加成，防止零互动新评论沉底） */
-    @Update("UPDATE video_comment SET hot_score = hot_score + #{bonus}, updated_at = NOW(3) WHERE id = #{commentId}")
-    int updateHotScore(@Param("commentId") long commentId, @Param("bonus") int bonus);
+    /** 当前读，避免默认 REPEATABLE READ 下并发幂等请求返回旧快照。 */
+    @Select("SELECT like_count FROM video_comment WHERE id = #{commentId} FOR UPDATE")
+    long selectLikeCountForUpdate(@Param("commentId") long commentId);
 
     /** 删除评论（逻辑删除）；一级评论删除后其回复一并隐藏 */
     @Update("UPDATE video_comment SET status = 'DELETED', deleted_at = NOW(3), deleted_by = #{userId}, "

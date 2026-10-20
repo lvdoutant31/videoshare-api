@@ -19,6 +19,6 @@ public class AdminHealthController {
     @GetMapping("/health")
     public ApiResponse<Map<String, String>> health(HttpServletRequest request) {
         String traceId = (String) request.getAttribute(TraceIdFilter.ATTRIBUTE);
-        return ApiResponse.ok(Map.of("service", "admin-api", "status", "UP"), traceId);
+        return ApiResponse.ok(Map.of("service", "videoshare-admin-api", "status", "UP"), traceId);
     }
 }

@@ -18,6 +18,12 @@ import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+
 import static org.hamcrest.Matchers.hasSize;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -87,6 +93,7 @@ class AppApiIntegrationTest {
         jdbcTemplate.update("DELETE FROM sys_user_agreement");
         jdbcTemplate.update("DELETE FROM sys_verification_record");
         jdbcTemplate.update("DELETE FROM user_comment_like");
+        jdbcTemplate.update("DELETE FROM comment_reply_notification");
         jdbcTemplate.update("DELETE FROM video_comment");
         jdbcTemplate.update("DELETE FROM user_video_like");
         jdbcTemplate.update("DELETE FROM user_video_favorite");
@@ -95,6 +102,9 @@ class AppApiIntegrationTest {
         jdbcTemplate.update("DELETE FROM video_share_event");
         jdbcTemplate.update("DELETE FROM user_follow");
         jdbcTemplate.update("DELETE FROM video_tag_map");
+        jdbcTemplate.update("DELETE FROM video_watch_event");
+        jdbcTemplate.update("DELETE FROM video_watch_session");
+        jdbcTemplate.update("DELETE FROM video_watch_daily");
         jdbcTemplate.update("DELETE FROM video_stats");
         jdbcTemplate.update("DELETE FROM video");
         jdbcTemplate.update("DELETE FROM media_resource");
@@ -110,6 +120,46 @@ class AppApiIntegrationTest {
         insertUser(PEER_ID, "同行用户");
         insertMedia(ORIGINAL_MEDIA_ID, "VIDEO_ORIGINAL", "READY", "origin.mp4", "video/mp4", 60000);
         insertMedia(COVER_MEDIA_ID, "COVER", "READY", "cover.jpg", "image/jpeg", null);
+    }
+
+    @Test
+    void passwordRegistrationAndLoginCreateSession() throws Exception {
+        String phone = "13800138999";
+        String registerBody = "{\"phone\":\"" + phone + "\",\"password\":\"SecurePass123!\",\"name\":\"张三\",\"agreementVersion\":\"2026-08\"}";
+
+        mockMvc.perform(post("/api/v1/app/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"phone\":\"13800138998\",\"password\":\"SecurePass123!\",\"name\":\"\"}"))
+                .andExpect(status().isUnprocessableEntity());
+
+        mockMvc.perform(post("/api/v1/app/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON).content(registerBody))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/v1/app/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON).content(registerBody))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("STATE_CONFLICT"));
+
+        mockMvc.perform(post("/api/v1/app/auth/password/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"phone\":\"" + phone + "\",\"password\":\"wrong-password\"}"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+
+        String loginJson = mockMvc.perform(post("/api/v1/app/auth/password/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"phone\":\"" + phone + "\",\"password\":\"SecurePass123!\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.accessToken").isNotEmpty())
+                .andExpect(jsonPath("$.data.user.nickname").value("张三"))
+                .andReturn().getResponse().getContentAsString();
+
+        String token = new com.fasterxml.jackson.databind.ObjectMapper().readTree(loginJson)
+                .path("data").path("accessToken").asText();
+        mockMvc.perform(get("/api/v1/app/me").header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.id").isNotEmpty());
     }
 
     @Test
@@ -163,6 +213,8 @@ class AppApiIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.active").value(true))
                 .andExpect(jsonPath("$.data.count").value(1));
+        org.junit.jupiter.api.Assertions.assertEquals(1L, jdbcTemplate.queryForObject(
+                "SELECT like_received_count FROM sys_user WHERE id = ?", Long.class, AUTHOR_ID));
 
         // 重复点赞不重复计数（幂等）
         mockMvc.perform(put("/api/v1/app/videos/{id}/like", videoId)
@@ -177,6 +229,8 @@ class AppApiIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON).content("{\"active\":false}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.count").value(0));
+        org.junit.jupiter.api.Assertions.assertEquals(0L, jdbcTemplate.queryForObject(
+                "SELECT like_received_count FROM sys_user WHERE id = ?", Long.class, AUTHOR_ID));
 
         // 收藏并出现在 me/favorites
         mockMvc.perform(put("/api/v1/app/videos/{id}/favorite", videoId)
@@ -187,6 +241,88 @@ class AppApiIntegrationTest {
         mockMvc.perform(get("/api/v1/app/me/favorites").header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.items[0].id").value(String.valueOf(videoId)));
+    }
+
+    @Test
+    void concurrentDuplicateLikesIncrementCountersOnce() throws Exception {
+        long videoId = insertVideo("并发点赞幂等视频");
+        String token = login("13800138013");
+        long viewerId = extractUserId(token);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        java.util.concurrent.Callable<String> request = () -> {
+            ready.countDown();
+            start.await(5, TimeUnit.SECONDS);
+            return mockMvc.perform(put("/api/v1/app/videos/{id}/like", videoId)
+                            .header("Authorization", "Bearer " + token)
+                            .contentType(MediaType.APPLICATION_JSON).content("{\"active\":true}"))
+                    .andExpect(status().isOk())
+                    .andReturn().getResponse().getContentAsString();
+        };
+
+        try {
+            Future<String> first = executor.submit(request);
+            Future<String> second = executor.submit(request);
+            org.junit.jupiter.api.Assertions.assertTrue(ready.await(5, TimeUnit.SECONDS));
+            start.countDown();
+            com.fasterxml.jackson.databind.ObjectMapper objectMapper = new com.fasterxml.jackson.databind.ObjectMapper();
+            org.junit.jupiter.api.Assertions.assertEquals(1L,
+                    objectMapper.readTree(first.get(10, TimeUnit.SECONDS)).at("/data/count").asLong());
+            org.junit.jupiter.api.Assertions.assertEquals(1L,
+                    objectMapper.readTree(second.get(10, TimeUnit.SECONDS)).at("/data/count").asLong());
+        } finally {
+            start.countDown();
+            executor.shutdownNow();
+        }
+
+        org.junit.jupiter.api.Assertions.assertEquals(1L, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM user_video_like WHERE user_id = ? AND video_id = ?",
+                Long.class, viewerId, videoId));
+        org.junit.jupiter.api.Assertions.assertEquals(1L, jdbcTemplate.queryForObject(
+                "SELECT like_count FROM video_stats WHERE video_id = ?", Long.class, videoId));
+        org.junit.jupiter.api.Assertions.assertEquals(1L, jdbcTemplate.queryForObject(
+                "SELECT like_received_count FROM sys_user WHERE id = ?", Long.class, AUTHOR_ID));
+    }
+
+    @Test
+    void commentLikeIsIdempotentAndUnlikeReturnsNewCount() throws Exception {
+        long videoId = insertVideo("评论点赞幂等视频");
+        String token = login("13800138014");
+        mockMvc.perform(post("/api/v1/app/videos/{id}/comments", videoId)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"content\":\"点赞目标评论\"}"))
+                .andExpect(status().isOk());
+        long commentId = jdbcTemplate.queryForObject(
+                "SELECT id FROM video_comment WHERE video_id = ? AND content = '点赞目标评论'",
+                Long.class, videoId);
+
+        mockMvc.perform(put("/api/v1/app/comments/{id}/like", commentId)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"active\":true}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.count").value(1));
+        mockMvc.perform(put("/api/v1/app/comments/{id}/like", commentId)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"active\":true}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.count").value(1));
+        mockMvc.perform(put("/api/v1/app/comments/{id}/like", commentId)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"active\":false}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.count").value(0));
+        mockMvc.perform(put("/api/v1/app/comments/{id}/like", commentId)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"active\":false}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.count").value(0));
+
+        org.junit.jupiter.api.Assertions.assertEquals(0L, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM user_comment_like WHERE comment_id = ?", Long.class, commentId));
+        org.junit.jupiter.api.Assertions.assertEquals(0L, jdbcTemplate.queryForObject(
+                "SELECT like_count FROM video_comment WHERE id = ?", Long.class, commentId));
     }
 
     @Test
@@ -267,6 +403,10 @@ class AppApiIntegrationTest {
         jdbcTemplate.update("UPDATE video SET author_id = ? WHERE id = ?", PEER_ID, otherVideoId);
         String token = login("13800138003");
 
+        mockMvc.perform(get("/api/v1/app/users/{id}", AUTHOR_ID).header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.following").value(false));
+
         mockMvc.perform(get("/api/v1/app/feed/following").header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.items", hasSize(0)));
@@ -291,7 +431,28 @@ class AppApiIntegrationTest {
         mockMvc.perform(get("/api/v1/app/users/{id}", AUTHOR_ID))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.nickname").value("公开作者"))
-                .andExpect(jsonPath("$.data.followerCount").value(1));
+                .andExpect(jsonPath("$.data.followerCount").value(1))
+                .andExpect(jsonPath("$.data.following").value(false));
+
+        for (int visit = 0; visit < 2; visit++) {
+            mockMvc.perform(get("/api/v1/app/users/{id}", AUTHOR_ID).header("Authorization", "Bearer " + token))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.following").value(true));
+        }
+        String otherViewerToken = login("13800138013");
+        mockMvc.perform(get("/api/v1/app/users/{id}", AUTHOR_ID).header("Authorization", "Bearer " + otherViewerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.following").value(false));
+
+        mockMvc.perform(put("/api/v1/app/users/{id}/follow", AUTHOR_ID)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"active\":false}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.active").value(false));
+        mockMvc.perform(get("/api/v1/app/users/{id}", AUTHOR_ID).header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.following").value(false))
+                .andExpect(jsonPath("$.data.followerCount").value(0));
     }
 
     @Test
@@ -328,8 +489,37 @@ class AppApiIntegrationTest {
                 .andExpect(jsonPath("$.data", hasSize(1)))
                 .andExpect(jsonPath("$.data[0].content").value("回复一下"));
 
-        // 点赞评论
+        mockMvc.perform(get("/api/v1/app/comment-notifications")
+                        .header("Authorization", "Bearer " + authorToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items", hasSize(1)))
+                .andExpect(jsonPath("$.data.items[0].actor.nickname").value("用户8005"))
+                .andExpect(jsonPath("$.data.items[0].content").value("回复一下"))
+                .andExpect(jsonPath("$.data.items[0].sourceContent").value("第一条评论"));
+
+        long notificationId = jdbcTemplate.queryForObject("SELECT id FROM comment_reply_notification", Long.class);
+        mockMvc.perform(put("/api/v1/app/comment-notifications/{id}/read", notificationId)
+                        .header("Authorization", "Bearer " + authorToken))
+                .andExpect(status().isOk());
+        org.junit.jupiter.api.Assertions.assertNotNull(jdbcTemplate.queryForObject(
+                "SELECT read_at FROM comment_reply_notification WHERE id = ?", java.time.LocalDateTime.class, notificationId));
+
+        // 一级评论作者可以继续回复他人的二级评论，回复者会收到通知
         long replyId = jdbcTemplate.queryForObject("SELECT id FROM video_comment WHERE content = '回复一下'", Long.class);
+        mockMvc.perform(post("/api/v1/app/videos/{id}/comments", videoId)
+                        .header("Authorization", "Bearer " + authorToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"content\":\"继续回复\",\"replyToCommentId\":" + replyId + "}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("NORMAL"));
+        mockMvc.perform(get("/api/v1/app/comment-notifications")
+                        .header("Authorization", "Bearer " + peerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items", hasSize(1)))
+                .andExpect(jsonPath("$.data.items[0].content").value("继续回复"))
+                .andExpect(jsonPath("$.data.items[0].sourceContent").value("回复一下"));
+
+        // 点赞评论
         mockMvc.perform(put("/api/v1/app/comments/{id}/like", replyId)
                         .header("Authorization", "Bearer " + authorToken)
                         .contentType(MediaType.APPLICATION_JSON).content("{\"active\":true}"))
@@ -347,7 +537,57 @@ class AppApiIntegrationTest {
                 .andExpect(status().isOk());
         mockMvc.perform(get("/api/v1/app/comments/{id}/replies", rootId))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data", hasSize(0)));
+                .andExpect(jsonPath("$.data", hasSize(1)))
+                .andExpect(jsonPath("$.data[0].content").value("继续回复"));
+    }
+
+    @Test
+    void reportReasonSeedPreservesExistingConfiguration() throws Exception {
+        jdbcTemplate.update("UPDATE sys_report_reason SET reason_name = '自定义广告原因', status = 'DISABLED' WHERE reason_code = 'SPAM'");
+        try (java.sql.Connection connection = jdbcTemplate.getDataSource().getConnection()) {
+            org.springframework.jdbc.datasource.init.ScriptUtils.executeSqlScript(connection,
+                    new org.springframework.core.io.support.EncodedResource(
+                            new org.springframework.core.io.ClassPathResource("db/migration/V202610101200__seed_app_report_reasons.sql"),
+                            java.nio.charset.StandardCharsets.UTF_8));
+            org.junit.jupiter.api.Assertions.assertEquals("自定义广告原因", jdbcTemplate.queryForObject(
+                    "SELECT reason_name FROM sys_report_reason WHERE reason_code = 'SPAM'", String.class));
+            org.junit.jupiter.api.Assertions.assertEquals("DISABLED", jdbcTemplate.queryForObject(
+                    "SELECT status FROM sys_report_reason WHERE reason_code = 'SPAM'", String.class));
+            org.junit.jupiter.api.Assertions.assertEquals(6,
+                    jdbcTemplate.queryForObject("SELECT COUNT(*) FROM sys_report_reason", Integer.class));
+        } finally {
+            jdbcTemplate.update("UPDATE sys_report_reason SET reason_name = '垃圾广告/营销', status = 'ENABLED' WHERE reason_code = 'SPAM'");
+        }
+    }
+
+    @Test
+    void reportReasonsAreSeededAndFilteredByEnabledTargetType() throws Exception {
+        for (String type : java.util.List.of("VIDEO", "COMMENT", "USER")) {
+            mockMvc.perform(get("/api/v1/app/report-reasons").param("targetType", type))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data", hasSize(6)))
+                    .andExpect(jsonPath("$.data[0].code").value("SPAM"))
+                    .andExpect(jsonPath("$.data[0].targetTypes", hasSize(3)));
+        }
+        jdbcTemplate.update("""
+                INSERT INTO sys_report_reason (id, reason_code, reason_name, target_types, sort, status, created_at, updated_at)
+                VALUES (91001, 'VIDEO_ONLY', '仅视频', JSON_ARRAY('VIDEO'), 0, 'ENABLED', NOW(3), NOW(3)),
+                       (91002, 'DISABLED_REASON', '停用原因', JSON_ARRAY('VIDEO'), -1, 'DISABLED', NOW(3), NOW(3))
+                """);
+        try {
+            mockMvc.perform(get("/api/v1/app/report-reasons").param("targetType", "VIDEO"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data", hasSize(7)))
+                    .andExpect(jsonPath("$.data[0].code").value("VIDEO_ONLY"))
+                    .andExpect(jsonPath("$.data[0].targetTypes[0]").value("VIDEO"));
+            mockMvc.perform(get("/api/v1/app/report-reasons").param("targetType", "USER"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data", hasSize(6)));
+            mockMvc.perform(get("/api/v1/app/report-reasons").param("targetType", "INVALID"))
+                    .andExpect(status().isUnprocessableEntity());
+        } finally {
+            jdbcTemplate.update("DELETE FROM sys_report_reason WHERE id IN (91001, 91002)");
+        }
     }
 
     @Test
@@ -364,6 +604,22 @@ class AppApiIntegrationTest {
         Integer reportCount = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM content_report WHERE target_type = 'VIDEO' AND target_id = ?", Integer.class, videoId);
         org.junit.jupiter.api.Assertions.assertEquals(1, reportCount);
+
+        mockMvc.perform(post("/api/v1/app/videos/{id}/comments", videoId)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"content\":\"举报评论\"}"))
+                .andExpect(status().isOk());
+        long commentId = jdbcTemplate.queryForObject("SELECT id FROM video_comment WHERE content = '举报评论'", Long.class);
+        mockMvc.perform(post("/api/v1/app/comments/{id}/report", commentId)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"reasonCode\":\"SPAM\"}"))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/app/users/{id}/report", PEER_ID)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"reasonCode\":\"OTHER\"}"))
+                .andExpect(status().isOk());
+        org.junit.jupiter.api.Assertions.assertEquals(3,
+                jdbcTemplate.queryForObject("SELECT COUNT(*) FROM content_report", Integer.class));
     }
 
     @Test
@@ -462,6 +718,43 @@ class AppApiIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"events\":[{\"eventName\":\"hack_event\",\"anonymousSessionId\":\"s\"}]}"))
                 .andExpect(status().isUnprocessableEntity());
+    }
+
+    @Test
+    void watchProgressIsIdempotentAndCountsActualWallClockTime() throws Exception {
+        long videoId = insertVideo("真实观看时长视频");
+        String sessionId = "10000000-0000-0000-0000-000000000001";
+        String anonymousId = "20000000-0000-0000-0000-000000000001";
+        String first = "{\"events\":[{\"eventId\":\"30000000-0000-0000-0000-000000000001\","
+                + "\"playSessionId\":\"" + sessionId + "\",\"eventName\":\"video_play_progress\","
+                + "\"occurredAt\":\"2026-09-28T04:00:00Z\",\"anonymousSessionId\":\"" + anonymousId + "\","
+                + "\"videoId\":" + videoId + ",\"properties\":{\"watchedDeltaMs\":2000,"
+                + "\"positionMs\":4000,\"durationMs\":60000}}]}";
+        String second = "{\"events\":[{\"eventId\":\"30000000-0000-0000-0000-000000000002\","
+                + "\"playSessionId\":\"" + sessionId + "\",\"eventName\":\"video_play_progress\","
+                + "\"occurredAt\":\"2026-09-28T04:00:02Z\",\"anonymousSessionId\":\"" + anonymousId + "\","
+                + "\"videoId\":" + videoId + ",\"properties\":{\"watchedDeltaMs\":2000,"
+                + "\"positionMs\":55000,\"durationMs\":60000}}]}";
+
+        mockMvc.perform(post("/api/v1/analytics/events/batch").contentType(MediaType.APPLICATION_JSON).content(first))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/analytics/events/batch").contentType(MediaType.APPLICATION_JSON).content(first))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/analytics/events/batch").contentType(MediaType.APPLICATION_JSON).content(second))
+                .andExpect(status().isOk());
+
+        Long watchTime = jdbcTemplate.queryForObject(
+                "SELECT watch_time_ms FROM video_watch_session WHERE play_session_id = ?", Long.class, sessionId);
+        Long plays = jdbcTemplate.queryForObject(
+                "SELECT play_count FROM video_stats WHERE video_id = ?", Long.class, videoId);
+        Long dailyWatchTime = jdbcTemplate.queryForObject(
+                "SELECT watch_time_ms FROM video_watch_daily WHERE video_id = ?", Long.class, videoId);
+        Integer eventCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM video_watch_event WHERE play_session_id = ?", Integer.class, sessionId);
+        org.junit.jupiter.api.Assertions.assertEquals(4000L, watchTime);
+        org.junit.jupiter.api.Assertions.assertEquals(1L, plays);
+        org.junit.jupiter.api.Assertions.assertEquals(4000L, dailyWatchTime);
+        org.junit.jupiter.api.Assertions.assertEquals(2, eventCount);
     }
 
     @Test

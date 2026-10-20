@@ -14,7 +14,8 @@ public interface DashboardService {
     record Metric(String key, String label, String value, String changeLabel, String tone) { }
     record Trend(String range, List<TrendPoint> points) { }
     record TrendPoint(String date, long plays, long interactions) { }
-    record Todo(String key, String label, long count, String tone) { }
+    record Todo(String key, String label, long count, String tone, String to) { }
     record Storage(String mount, int usedPercent, String backupStatus, String lastBackupAt) { }
-    record RecentVideo(String id, String title, String author, String status, Long playCount, LocalDateTime publishedAt) { }
+    record RecentVideo(String id, String title, String author, String status, Long playCount,
+                       Long interactionCount, LocalDateTime publishedAt, LocalDateTime updatedAt) { }
 }

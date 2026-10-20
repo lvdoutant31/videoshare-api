@@ -37,12 +37,17 @@ public class AdminPermissionCache {
 
     private static final String PERMISSIONS_SQL = """
             SELECT DISTINCT p.permission_code
+            FROM sys_admin_user_permission aup
+            JOIN sys_permission p ON p.id = aup.permission_id
+            WHERE aup.admin_user_id = ?
+            UNION
+            SELECT p.permission_code
             FROM sys_admin_user_role aur
-            JOIN sys_role r ON r.id = aur.role_id AND r.status = 'NORMAL'
+            JOIN sys_role r ON r.id = aur.role_id AND r.status = 'NORMAL' AND r.role_code = 'SUPER_ADMIN'
             JOIN sys_role_permission rp ON rp.role_id = r.id
             JOIN sys_permission p ON p.id = rp.permission_id
             WHERE aur.admin_user_id = ?
-            ORDER BY p.permission_code
+            ORDER BY permission_code
             """;
 
     private static final String ROLES_SQL = """
@@ -71,23 +76,23 @@ public class AdminPermissionCache {
         if (cached != null) {
             Grants parsed = parse(cached);
             if (parsed != null) {
-                log.info("Admin authorization: stage=permission-cache result=hit adminId={} version={} roles={} permissions={}",
+                log.debug("管理员权限缓存命中 adminId={} version={}",
                         adminId, version, parsed.roleCodes(), parsed.permissions());
                 return parsed;
             }
-            log.info("Admin authorization: stage=permission-cache result=invalid adminId={} version={}",
+            log.warn("管理员权限缓存格式无效，正在从数据库重新加载 adminId={} version={}",
                     adminId, version);
         } else {
-            log.info("Admin authorization: stage=permission-cache result=miss adminId={} version={}",
+            log.debug("管理员权限缓存未命中 adminId={} version={}",
                     adminId, version);
         }
         Grants fresh = new Grants(
-                jdbcTemplate.query(PERMISSIONS_SQL, (rs, rowNum) -> rs.getString(1), adminId),
+                jdbcTemplate.query(PERMISSIONS_SQL, (rs, rowNum) -> rs.getString(1), adminId, adminId),
                 jdbcTemplate.query(ROLES_SQL, (rs, rowNum) -> rs.getString(1), adminId));
-        log.info("Admin authorization: stage=permission-database result=loaded adminId={} roles={} permissions={}",
-                adminId, fresh.roleCodes(), fresh.permissions());
+        log.debug("已从数据库加载管理员权限 adminId={} roleCount={} permissionCount={}",
+                adminId, fresh.roleCodes().size(), fresh.permissions().size());
         store.set(key, serialize(fresh), GRANTS_TTL_SECONDS);
-        log.info("Admin authorization: stage=permission-cache result=stored adminId={} version={} ttlSeconds={}",
+        log.debug("管理员权限已写入缓存 adminId={} version={} ttlSeconds={}",
                 adminId, version, GRANTS_TTL_SECONDS);
         return fresh;
     }
@@ -98,7 +103,7 @@ public class AdminPermissionCache {
      */
     public void invalidateAll() {
         store.increment(VERSION_KEY, VERSION_TTL_SECONDS);
-        log.info("Admin authorization: stage=permission-cache result=invalidated scope=all");
+        log.debug("管理员权限缓存已全部失效");
     }
 
     private long version() {
@@ -106,29 +111,23 @@ public class AdminPermissionCache {
         if (current != null) {
             try {
                 long version = Long.parseLong(current);
-                log.info("Admin authorization: stage=permission-cache-version result=hit version={}", version);
                 return version;
             } catch (NumberFormatException ignored) {
-                log.info("Admin authorization: stage=permission-cache-version result=invalid valueType=non-numeric");
+                log.warn("管理员权限缓存版本号无效，将重新初始化");
                 // 值不可解析时按缺失处理，重新初始化。
             }
         }
         long initial = System.currentTimeMillis();
         store.set(VERSION_KEY, String.valueOf(initial), VERSION_TTL_SECONDS);
-        log.info("Admin authorization: stage=permission-cache-version result=initialized proposedVersion={}", initial);
         String settled = store.get(VERSION_KEY);
         if (settled == null) {
-            log.info("Admin authorization: stage=permission-cache-version result=use-proposed reason=missing-after-initialize version={}",
-                    initial);
             return initial;
         }
         try {
             long version = Long.parseLong(settled);
-            log.info("Admin authorization: stage=permission-cache-version result=settled version={}", version);
             return version;
         } catch (NumberFormatException ignored) {
-            log.info("Admin authorization: stage=permission-cache-version result=use-proposed reason=invalid-after-initialize version={}",
-                    initial);
+            log.warn("管理员权限缓存版本号并发初始化异常，将使用本次版本号");
             // 并发初始化时另一请求写入了非数字值；以本次时间戳为准，最坏结果只是一次缓存未命中。
             return initial;
         }
@@ -138,8 +137,7 @@ public class AdminPermissionCache {
         try {
             return objectMapper.writeValueAsString(grants);
         } catch (JsonProcessingException exception) {
-            log.info("Admin authorization: stage=permission-cache-serialize result=failed reason={}",
-                    exception.getClass().getSimpleName());
+            log.error("管理员权限缓存序列化失败，将跳过本次缓存写入", exception);
             // 序列化失败不应影响鉴权：写入空串让下一次读回按未命中处理。
             return "";
         }
@@ -152,8 +150,7 @@ public class AdminPermissionCache {
         try {
             return objectMapper.readValue(raw, Grants.class);
         } catch (JsonProcessingException exception) {
-            log.info("Admin authorization: stage=permission-cache-parse result=failed reason={}",
-                    exception.getClass().getSimpleName());
+            log.warn("管理员权限缓存解析失败，将从数据库重新加载", exception);
             // 缓存格式变更或数据损坏时按未命中处理，回源数据库即可自愈。
             return null;
         }

@@ -68,14 +68,14 @@ public class AdminTagController {
     @PostMapping
     @OperLog(module = "TAXONOMY", action = "CREATE", targetType = "TAG", detail = "创建标签")
     public ResponseEntity<ApiResponse<TagDtos.View>> create(@Valid @RequestBody TagDtos.Create body, HttpServletRequest request) {
-        authorizer.require("tag:manage");
+        authorizer.require("tag:create");
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.ok(view(service.create(body.name(), body.status(), body.heatScore())), traceId(request)));
     }
 
     @PatchMapping("/{tagId}")
     @OperLog(module = "TAXONOMY", action = "UPDATE", targetType = "TAG")
     public ApiResponse<TagDtos.View> update(@PathVariable long tagId, @Valid @RequestBody TagDtos.Update body, HttpServletRequest request) {
-        authorizer.require("tag:manage");
+        authorizer.require("tag:update");
         if (body.name() == null && body.status() == null && body.heatScore() == null) {
             throw new BusinessException("VALIDATION_FAILED", HttpStatus.UNPROCESSABLE_ENTITY, "至少提供一个待更新字段");
         }
@@ -85,7 +85,7 @@ public class AdminTagController {
     @DeleteMapping("/{tagId}")
     @OperLog(module = "TAXONOMY", action = "DELETE", targetType = "TAG")
     public ApiResponse<Void> delete(@PathVariable long tagId, HttpServletRequest request) {
-        authorizer.require("tag:manage");
+        authorizer.require("tag:delete");
         service.delete(tagId);
         return ApiResponse.ok(null, traceId(request));
     }
@@ -94,7 +94,7 @@ public class AdminTagController {
     @PostMapping("/{tagId}/restore")
     @OperLog(module = "TAXONOMY", action = "RESTORE", targetType = "TAG", detail = "恢复标签")
     public ApiResponse<TagDtos.View> restore(@PathVariable long tagId, HttpServletRequest request) {
-        authorizer.require("tag:manage");
+        authorizer.require("tag:restore");
         return ApiResponse.ok(view(service.restore(tagId)), traceId(request));
     }
 

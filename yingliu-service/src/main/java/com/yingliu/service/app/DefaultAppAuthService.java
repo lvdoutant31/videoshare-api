@@ -20,10 +20,12 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Profile;
 import org.springframework.http.HttpStatus;
+import org.mindrot.jbcrypt.BCrypt;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.security.SecureRandom;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Objects;
@@ -75,6 +77,36 @@ public class DefaultAppAuthService implements AppAuthService {
     }
 
     @Override
+    @Transactional
+    public LoginResult registerByPassword(String phone, String password, String name, String agreementVersion) {
+        validatePassword(password);
+        String normalizedName = validateName(name);
+        String hmac = PhoneCrypto.hmac(phone, cryptoKey);
+        if (userMapper.selectByPhoneHmac(hmac) != null) {
+            throw new BusinessException("STATE_CONFLICT", HttpStatus.CONFLICT, "该手机号已注册");
+        }
+        AppUser user = createUser(phone, hmac, BCrypt.hashpw(password, BCrypt.gensalt()), normalizedName);
+        if (agreementVersion != null && !agreementVersion.isBlank()) {
+            recordAgreement(user.getId(), "USER_AGREEMENT", agreementVersion);
+        }
+        return new LoginResult(user.getId(), user.getNickname(), user.getStatus());
+    }
+
+    @Override
+    @Transactional
+    public LoginResult loginByPassword(String phone, String password) {
+        validatePassword(password);
+        AppUser user = userMapper.selectByPhoneHmac(PhoneCrypto.hmac(phone, cryptoKey));
+        if (user == null || user.getPasswordHash() == null || !BCrypt.checkpw(password, user.getPasswordHash())) {
+            throw new BusinessException("VALIDATION_FAILED", HttpStatus.UNAUTHORIZED, "手机号或密码错误");
+        }
+        assertAccountUsable(user);
+        user.setLastLoginAt(LocalDateTime.now());
+        userMapper.updateById(user);
+        return new LoginResult(user.getId(), user.getNickname(), user.getStatus());
+    }
+
+    @Override
     public int sendPhoneCode(String phone, String clientIp) {
         if (!phone.matches("^1\\d{10}$")) {
             throw new BusinessException("VALIDATION_FAILED", HttpStatus.UNPROCESSABLE_ENTITY, "手机号格式不正确");
@@ -98,7 +130,7 @@ public class DefaultAppAuthService implements AppAuthService {
 
         if (smsSendEnabled) {
             // 首期不接真实短信服务商，仅日志输出；接入后在此调用发送服务
-            log.info("验证码发送（模拟） phone={} code={}", mask(phone), code);
+            log.debug("开发环境模拟验证码 phone={} code={}", mask(phone), code);
         }
         return CODE_TTL_SECONDS;
     }
@@ -187,10 +219,15 @@ public class DefaultAppAuthService implements AppAuthService {
     }
 
     private AppUser createUser(String phone, String hmac) {
+        return createUser(phone, hmac, null, null);
+    }
+
+    private AppUser createUser(String phone, String hmac, String passwordHash, String name) {
         AppUser user = new AppUser();
         user.setPhoneCiphertext(PhoneCrypto.encrypt(phone, cryptoKey));
         user.setPhoneHmac(hmac);
-        user.setNickname("用户" + phone.substring(phone.length() - 4));
+        user.setPasswordHash(passwordHash);
+        user.setNickname(name == null ? "用户" + phone.substring(phone.length() - 4) : name);
         user.setStatus("NORMAL");
         user.setViolationCount(0);
         user.setLikeReceivedCount(0L);
@@ -199,6 +236,23 @@ public class DefaultAppAuthService implements AppAuthService {
         user.setDeleted(0);
         userMapper.insert(user);
         return user;
+    }
+
+    private void validatePassword(String password) {
+        int bytes = password == null ? 0 : password.getBytes(StandardCharsets.UTF_8).length;
+        if (password == null || password.length() < 8 || password.length() > 64 || bytes > 72) {
+            throw new BusinessException("VALIDATION_FAILED", HttpStatus.UNPROCESSABLE_ENTITY,
+                    "密码须为 8 至 64 个字符，且编码后不超过 72 字节");
+        }
+    }
+
+    private String validateName(String name) {
+        String normalized = name == null ? "" : name.trim();
+        if (normalized.isEmpty() || normalized.length() > 30) {
+            throw new BusinessException("VALIDATION_FAILED", HttpStatus.UNPROCESSABLE_ENTITY,
+                    "姓名须为 1 至 30 个字符");
+        }
+        return normalized;
     }
 
     private void assertAccountUsable(AppUser user) {

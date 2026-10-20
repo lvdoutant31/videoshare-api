@@ -28,7 +28,7 @@ public class AdminSessionCookieWriter {
         // Sa-Token normally adds this header during login. Set it explicitly so the final servlet
         // response remains correct even when an adapter or response wrapper drops that first header.
         response.setHeader(HttpHeaders.SET_COOKIE, cookie.toString());
-        log.info("Admin login cookie: result=issued name={} path={} secure={} sameSite={} maxAge={}",
+        log.debug("管理端会话 Cookie 已签发 name={} path={} secure={} sameSite={} maxAge={}",
                 cookie.getName(), cookie.getPath(), cookie.isSecure(), cookie.getSameSite(), cookie.getMaxAge());
     }
 

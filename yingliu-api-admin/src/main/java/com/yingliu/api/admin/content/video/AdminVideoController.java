@@ -86,7 +86,7 @@ public class AdminVideoController {
                                                                   HttpServletRequest request) {
         long adminId = authorizer.require("video:create");
         VideoAdminService.CreateDraftCommand command = new VideoAdminService.CreateDraftCommand(
-                adminId, service.currentAuthorId(adminId), id(body.originalMediaId()), optionalId(body.coverMediaId()),
+                adminId, service.currentAuthorId(adminId), optionalId(body.originalMediaId()), optionalId(body.coverMediaId()),
                 body.title(), body.description(), body.sourceNote(), ids(body.categoryIds()), ids(body.tagIds()), body.visibility());
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.ok(detail(service.createDraft(command)), traceId(request)));
     }
@@ -195,7 +195,7 @@ public class AdminVideoController {
 
     private VideoDtos.Summary summary(VideoAdminService.VideoSummary item) {
         return new VideoDtos.Summary(String.valueOf(item.id()), String.valueOf(item.authorId()), item.authorNickname(),
-                item.title(), item.auditStatus(), item.publishStatus(), item.visibility(), time(item.createdAt()), time(item.updatedAt()));
+                item.title(), item.auditStatus(), item.publishStatus(), item.visibility(), item.watchTimeMs(), time(item.createdAt()), time(item.updatedAt()));
     }
 
     private VideoDtos.Detail detail(VideoAdminService.VideoDetail item) {
@@ -204,7 +204,7 @@ public class AdminVideoController {
                 item.auditStatus(), item.publishStatus(), item.visibility(), item.riskLevel(), item.currentVersion(),
                 item.categories().stream().map(category -> new VideoDtos.CategoryView(String.valueOf(category.id()), category.name())).toList(),
                 item.tags().stream().map(tag -> new VideoDtos.TagView(String.valueOf(tag.id()), tag.name())).toList(),
-                time(item.scheduledAt()), time(item.publishedAt()), time(item.createdAt()), time(item.updatedAt()));
+                time(item.scheduledAt()), time(item.publishedAt()), item.watchTimeMs(), time(item.createdAt()), time(item.updatedAt()));
     }
 
     private VideoDtos.MediaView media(VideoAdminService.MediaView item) {

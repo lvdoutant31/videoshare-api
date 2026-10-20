@@ -28,6 +28,7 @@ import java.util.List;
  * App 域互动（§2.3）：点赞/收藏/关注目标状态幂等；个人列表；作者主页与作品。
  */
 @RestController
+@org.springframework.validation.annotation.Validated
 @ConditionalOnBean(AppInteractionService.class)
 @RequestMapping("/api/v1/app")
 public class AppInteractionController {
@@ -79,6 +80,7 @@ public class AppInteractionController {
     }
 
     @GetMapping("/me/following")
+
     public ApiResponse<List<AppInteractionService.UserBriefView>> following(HttpServletRequest request) {
         return ApiResponse.ok(service.listFollowing(actor.currentUserId()), traceId(request));
     }
@@ -91,7 +93,7 @@ public class AppInteractionController {
     @GetMapping("/users/{userId}")
     public ApiResponse<AppInteractionService.AuthorProfileView> authorProfile(@PathVariable long userId,
                                                                               HttpServletRequest request) {
-        return ApiResponse.ok(service.getAuthorProfile(userId), traceId(request));
+        return ApiResponse.ok(service.getAuthorProfile(userId, actor.optionalUserId()), traceId(request));
     }
 
     @GetMapping("/users/{userId}/videos")
@@ -104,6 +106,22 @@ public class AppInteractionController {
     }
 
     // ---- 组装 ----
+
+    @GetMapping("/users")
+    public ApiResponse<CursorPage<AppInteractionService.AuthorSearchView>> authors(
+            @RequestParam String keyword, @RequestParam(required = false) String cursor,
+            @RequestParam(defaultValue = "20") @Min(1) @Max(50) int limit, HttpServletRequest request) {
+        return ApiResponse.ok(service.searchAuthors(keyword, cursor, limit, actor.optionalUserId()), traceId(request));
+    }
+
+    @GetMapping("/users/{userId}/likes")
+    public ApiResponse<AppVideoDtos.CursorPage> authorLikes(@PathVariable long userId,
+            @RequestParam(required = false) String cursor,
+            @RequestParam(defaultValue = "20") @Min(1) @Max(50) int limit, HttpServletRequest request) {
+        Long viewerId = actor.optionalUserId();
+        service.getAuthorProfile(userId, viewerId);
+        return ApiResponse.ok(assemblePage(service.listLikeVideoIds(userId, cursor, limit), viewerId), traceId(request));
+    }
 
     private AppVideoDtos.CursorPage assemblePage(CursorPage<String> ids) {
         return assemblePage(ids, actor.optionalUserId());
@@ -125,7 +143,7 @@ public class AppInteractionController {
 
     private VideoAppService.FeedItem toFeed(VideoAppService.VideoDetail detail) {
         return new VideoAppService.FeedItem(detail.id(), detail.authorId(), detail.authorNickname(), detail.title(),
-                detail.description(), detail.durationMs(), detail.videoUrl(), detail.cover(), detail.tags(), detail.stats(),
+                detail.description(), detail.durationMs(), detail.videoUrl(), detail.cover(), detail.categories(), detail.tags(), detail.stats(),
                 detail.publishedAt(), detail.viewerState(), detail.authorFollowing());
     }
 

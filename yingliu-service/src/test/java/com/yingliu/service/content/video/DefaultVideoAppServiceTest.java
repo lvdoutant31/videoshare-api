@@ -6,11 +6,13 @@ import com.yingliu.domain.content.video.VideoAuthor;
 import com.yingliu.media.storage.MediaStorage;
 import com.yingliu.service.app.AppInteractionService;
 import com.yingliu.service.content.tag.mapper.ContentTagMapper;
+import com.yingliu.service.content.category.mapper.ContentCategoryMapper;
 import com.yingliu.service.content.video.mapper.MediaResourceMapper;
 import com.yingliu.service.content.video.mapper.VideoAuthorMapper;
 import com.yingliu.service.content.video.mapper.VideoMapper;
 import com.yingliu.service.content.video.mapper.VideoStatsMapper;
 import com.yingliu.service.content.video.mapper.VideoTagMapMapper;
+import com.yingliu.service.content.video.mapper.VideoCategoryMapMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -31,6 +33,8 @@ class DefaultVideoAppServiceTest {
     @Mock private VideoStatsMapper statsMapper;
     @Mock private VideoTagMapMapper tagMapMapper;
     @Mock private ContentTagMapper tagMapper;
+    @Mock private VideoCategoryMapMapper categoryMapMapper;
+    @Mock private ContentCategoryMapper categoryMapper;
     @Mock private MediaStorage mediaStorage;
     @Mock private AppInteractionService interactionService;
     @Mock private VideoTranscodeService transcodeService;
@@ -40,7 +44,7 @@ class DefaultVideoAppServiceTest {
     @BeforeEach
     void setUp() {
         service = new DefaultVideoAppService(videoMapper, authorMapper, mediaMapper, statsMapper, tagMapMapper,
-                tagMapper, mediaStorage, interactionService, transcodeService);
+                tagMapper, categoryMapMapper, categoryMapper, mediaStorage, interactionService, transcodeService);
         Video video = new Video();
         video.setId(41L);
         video.setAuthorId(21L);
@@ -56,6 +60,7 @@ class DefaultVideoAppServiceTest {
         when(authorMapper.selectById(21L)).thenReturn(author);
         when(mediaMapper.selectById(51L)).thenReturn(original);
         when(tagMapMapper.selectList(any())).thenReturn(java.util.List.of());
+        when(categoryMapMapper.selectList(any())).thenReturn(java.util.List.of());
     }
 
     @Test

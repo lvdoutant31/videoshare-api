@@ -2,6 +2,9 @@ package com.yingliu.api.admin.log;
 
 import com.yingliu.api.admin.auth.AdminAuthService;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.yingliu.common.exception.BusinessException;
 import com.yingliu.framework.web.TraceIdFilter;
 import com.yingliu.domain.system.OperationLog;
@@ -28,7 +31,9 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Parameter;
 import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -90,21 +95,11 @@ public class OperationLogAspect {
         } finally {
             record.setDurationMs((int) (System.currentTimeMillis() - start));
             inferDefaults(record, joinPoint);
-            logInterface(record, joinPoint, result);
             if (!queue.offer(record)) {
-                log.warn("Operation log queue full, dropping log: module={}, action={}", record.getModule(), record.getAction());
+                log.warn("操作日志队列已满，本次记录未能入库：模块={}，操作={}", record.getModule(), record.getAction());
             }
         }
         return result;
-    }
-
-    private void logInterface(OperationLog record, ProceedingJoinPoint joinPoint, Object result) {
-        if (!log.isInfoEnabled()) return;
-        MethodSignature signature = (MethodSignature) joinPoint.getSignature();
-        String method = signature.getDeclaringType().getSimpleName() + "." + signature.getName();
-        log.info("Admin interface: method={}, path={}, action={}, status={}, durationMs={}, traceId={}, params={}, resultType={}",
-                record.getRequestMethod(), record.getRequestPath(), method, record.getStatus(), record.getDurationMs(),
-                record.getTraceId(), record.getRequestParams(), result == null ? "null" : result.getClass().getSimpleName());
     }
 
     private void populateActor(OperationLog record) {
@@ -142,7 +137,7 @@ public class OperationLogAspect {
                 PathVariable pv = parameters[i].getAnnotation(PathVariable.class);
                 if (pv != null) {
                     String name = pv.value().isEmpty() ? parameters[i].getName() : pv.value();
-                    pathVars.put(name, sanitize(args[i]));
+                    pathVars.put(name, sanitize(args[i], name));
                 }
             }
             if (!pathVars.isEmpty()) params.put("pathVariables", pathVars);
@@ -160,7 +155,7 @@ public class OperationLogAspect {
                         if (args[i] instanceof MultipartFile mf) {
                             queryParams.put(name, Map.of("fileName", mf.getOriginalFilename(), "size", mf.getSize()));
                         } else {
-                            queryParams.put(name, sanitize(args[i]));
+                            queryParams.put(name, sanitize(args[i], name));
                         }
                     }
                 }
@@ -169,7 +164,7 @@ public class OperationLogAspect {
                 for (Map.Entry<String, String[]> entry : paramMap.entrySet()) {
                     if (!queryParams.containsKey(entry.getKey())) {
                         String[] values = entry.getValue();
-                        queryParams.put(entry.getKey(), values.length == 1 ? values[0] : List.of(values));
+                        queryParams.put(entry.getKey(), sanitize(values.length == 1 ? values[0] : List.of(values), entry.getKey()));
                     }
                 }
                 if (!queryParams.isEmpty()) params.put("queryParams", queryParams);
@@ -179,7 +174,7 @@ public class OperationLogAspect {
             for (int i = 0; i < parameters.length; i++) {
                 RequestBody rb = parameters[i].getAnnotation(RequestBody.class);
                 if (rb != null && args[i] != null) {
-                    params.put("requestBody", sanitize(args[i]));
+                    params.put("requestBody", sanitize(args[i], null));
                     break;
                 }
             }
@@ -192,15 +187,42 @@ public class OperationLogAspect {
                 record.setRequestParams(json);
             }
         } catch (Exception ex) {
-            log.debug("Failed to capture request params: {}", ex.getMessage());
+            log.debug("采集操作日志请求参数失败：{}", ex.getMessage());
         }
     }
 
-    private Object sanitize(Object value) {
+    private Object sanitize(Object value, String fieldName) {
+        if (isSensitiveField(fieldName)) return "[已脱敏]";
         if (value instanceof MultipartFile mf) {
             return Map.of("fileName", mf.getOriginalFilename() != null ? mf.getOriginalFilename() : "", "size", mf.getSize());
         }
-        return value;
+        JsonNode sanitized = objectMapper.valueToTree(value);
+        redactSensitiveFields(sanitized);
+        return sanitized;
+    }
+
+    private void redactSensitiveFields(JsonNode value) {
+        if (value instanceof ObjectNode object) {
+            List<Map.Entry<String, JsonNode>> fields = new ArrayList<>();
+            object.fields().forEachRemaining(fields::add);
+            for (Map.Entry<String, JsonNode> field : fields) {
+                if (isSensitiveField(field.getKey())) object.put(field.getKey(), "[已脱敏]");
+                else redactSensitiveFields(field.getValue());
+            }
+        } else if (value instanceof ArrayNode array) {
+            array.forEach(this::redactSensitiveFields);
+        }
+    }
+
+    private boolean isSensitiveField(String fieldName) {
+        if (fieldName == null) return false;
+        String normalized = fieldName.replaceAll("[^a-zA-Z0-9]", "").toLowerCase(Locale.ROOT);
+        return normalized.contains("password") || normalized.contains("passwd")
+                || normalized.contains("token") || normalized.contains("secret")
+                || normalized.contains("authorization") || normalized.contains("cookie")
+                || normalized.contains("credential") || normalized.equals("code") || normalized.equals("smscode")
+                || normalized.equals("emailcode") || normalized.equals("phonecode")
+                || normalized.contains("verificationcode") || normalized.contains("captcha");
     }
 
     private void populateAnnotation(OperationLog record, ProceedingJoinPoint joinPoint) {
@@ -306,7 +328,7 @@ public class OperationLogAspect {
                 logMapper.insert(record);
             }
         } catch (Exception ex) {
-            log.error("Failed to flush operation logs (count={}): {}", batch.size(), ex.getMessage());
+            log.error("操作日志写入数据库失败：批次数量={}", batch.size(), ex);
         }
     }
 }
